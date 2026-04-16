@@ -1,0 +1,3 @@
+# TODO: написати промпт для AI фільтрації статей
+# Промпт має повертати JSON з полями:
+# include (bool), priority (HIGH/MEDIUM/LOW), summary, why_it_matters, tags (list)

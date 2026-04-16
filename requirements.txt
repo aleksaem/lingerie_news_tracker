@@ -1,0 +1,6 @@
+aiogram
+sqlalchemy
+httpx
+python-dotenv
+pydantic-settings
+anthropic
