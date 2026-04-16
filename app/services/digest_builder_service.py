@@ -1,24 +1,51 @@
 """
 DigestBuilderService — formats filtered articles into a Telegram-ready digest string.
 
-Produces a structured text message with sections by priority.
-Handles Telegram message length limits (4096 chars).
+Sorts by priority, takes top MAX_ARTICLES_PER_DIGEST, formats as MarkdownV2-compatible text.
 """
+
+from datetime import date
+from app.config import settings
 
 
 class DigestBuilderService:
-    """
-    Builds a formatted digest string from a list of enriched articles.
-    """
+
+    PRIORITY_ORDER = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
 
     def build(self, articles: list[dict]) -> str:
         """
-        Format articles into a human-readable digest for Telegram.
-        Groups by priority. Each item includes title, summary, why_it_matters, source URL.
-        Returns plain text or MarkdownV2 formatted string.
+        Приймає відфільтровані статті, повертає готовий Telegram текст.
         """
-        # TODO:
-        # 1. Group articles by priority (HIGH / MEDIUM / LOW)
-        # 2. Format each group with header and article entries
-        # 3. Truncate or paginate if total length > 4096 chars
-        raise NotImplementedError
+        if not articles:
+            return "📰 No relevant news found for today."
+
+        today = date.today().strftime("%d.%m.%Y")
+
+        sorted_articles = sorted(
+            articles,
+            key=lambda a: self.PRIORITY_ORDER.get(a.get("priority", "LOW"), 2)
+        )
+
+        top = sorted_articles[:settings.MAX_ARTICLES_PER_DIGEST]
+
+        lines = [f"📰 *Top News — {today}*\n"]
+
+        for i, article in enumerate(top, start=1):
+            title = article.get("title", "No title")
+            url = article.get("url", "")
+            summary = article.get("summary", "")
+            why = article.get("why_it_matters", "")
+            source = article.get("source", "")
+
+            lines.append(f"*{i}. {title}*")
+            if source:
+                lines.append(f"_{source}_")
+            if summary:
+                lines.append(f"{summary}")
+            if why:
+                lines.append(f"💡 {why}")
+            if url:
+                lines.append(f"[Read more]({url})")
+            lines.append("")
+
+        return "\n".join(lines).strip()
