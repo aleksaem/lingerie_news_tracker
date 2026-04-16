@@ -12,7 +12,7 @@ from app.config import settings
 class LLMClient:
 
     def __init__(self):
-        self._client = genai.Client(api_key=settings.LLM_API_KEY)
+        self.client = genai.Client(api_key=settings.LLM_API_KEY)
         self.model = settings.LLM_MODEL
 
     async def complete(self, prompt: str) -> str:
@@ -21,11 +21,12 @@ class LLMClient:
         Єдина точка входу для всіх LLM викликів у проєкті.
         """
         try:
-            response = await self._client.aio.models.generate_content(
+            response = await self.client.aio.models.generate_content(
                 model=self.model,
                 contents=prompt,
             )
-            return response.text
+            return response.text or ""
+
         except Exception as e:
             print(f"[LLMClient] Error: {e}")
             return ""
