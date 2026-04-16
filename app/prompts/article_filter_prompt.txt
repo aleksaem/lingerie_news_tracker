@@ -1,3 +1,39 @@
-# TODO: написати промпт для AI фільтрації статей
-# Промпт має повертати JSON з полями:
-# include (bool), priority (HIGH/MEDIUM/LOW), summary, why_it_matters, tags (list)
+You are an expert analyst for a fashion and lingerie industry intelligence system.
+
+Your task: analyze the article below and decide if it is relevant for a daily digest
+aimed at a lingerie/intimate apparel brand's marketing and strategy team.
+
+ARTICLE:
+Title: {title}
+Source: {source}
+Published: {published_at}
+Content: {content}
+
+RELEVANCE CRITERIA — include if the article covers:
+- Lingerie, intimate apparel, shapewear, swimwear market news
+- Key competitors: Skims, Victoria's Secret, Savage X Fenty, Intimissimi,
+  Calzedonia, Aerie, ThirdLove, Parade, Lively
+- Fashion week coverage mentioning lingerie or bodywear trends
+- Retail expansion, store openings, e-commerce shifts in fashion
+- Funding rounds, M&A, brand acquisitions in fashion/beauty
+- EU/US regulations affecting textile, labeling, sustainability
+- Consumer behavior shifts relevant to intimate apparel
+
+EXCLUDE if the article is:
+- General news unrelated to fashion or retail
+- Sports, politics, technology (unless directly fashion-related)
+- Duplicate or very similar to common industry knowledge
+- A press release with no strategic value
+
+Respond ONLY with a valid JSON object. No explanation, no markdown, no extra text.
+
+{
+  "include": true or false,
+  "relevance": "HIGH" or "MEDIUM" or "LOW",
+  "priority": "HIGH" or "MEDIUM" or "LOW",
+  "article_type": "competitor_news" or "trend" or "regulation" or "funding" or "retail" or "other",
+  "competitor": "brand name if mentioned, or null",
+  "summary": "2-3 sentence summary in English",
+  "why_it_matters": "1 sentence explaining strategic relevance, or null if excluded",
+  "tags": ["tag1", "tag2"]
+}

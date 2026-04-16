@@ -5,24 +5,39 @@ Used by ArticleFilterService to score and summarize articles.
 Reads LLM_API_KEY and LLM_MODEL from Settings.
 """
 
-# TODO: import anthropic, Settings
+import anthropic
+from app.config import settings
 
 
 class LLMClient:
-    """
-    Sends prompts to Claude and returns text completions.
-    """
 
     def __init__(self):
-        # TODO: init anthropic.AsyncAnthropic(api_key=settings.LLM_API_KEY)
-        #       store settings.LLM_MODEL
-        pass
+        self.client = anthropic.AsyncAnthropic(api_key=settings.LLM_API_KEY)
+        self.model = settings.LLM_MODEL
 
     async def complete(self, prompt: str) -> str:
         """
-        Send prompt to Claude, return response text.
-        Expects caller to handle JSON parsing of the response.
+        Відправляє промпт і повертає текст відповіді.
+        Єдина точка входу для всіх LLM викликів у проєкті.
         """
-        # TODO: call client.messages.create(model=..., max_tokens=..., messages=[...])
-        #       return response.content[0].text
-        raise NotImplementedError
+        try:
+            message = await self.client.messages.create(
+                model=self.model,
+                max_tokens=1024,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return message.content[0].text
+
+        except anthropic.RateLimitError:
+            print("[LLMClient] Rate limit — чекаємо 60 секунд")
+            import asyncio
+            await asyncio.sleep(60)
+            return await self.complete(prompt)
+
+        except anthropic.APIError as e:
+            print(f"[LLMClient] API error: {e}")
+            return ""
+
+        except Exception as e:
+            print(f"[LLMClient] Unexpected error: {e}")
+            return ""
