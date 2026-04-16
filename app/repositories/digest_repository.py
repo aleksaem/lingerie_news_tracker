@@ -5,25 +5,41 @@ Digest is a daily cached summary. Check get_by_date before running the pipeline;
 save after DigestBuilderService.build() completes.
 """
 
-# TODO: import Digest model, get_session
+from typing import Optional
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.db.models import Digest
 
 
 class DigestRepository:
-    """
-    CRUD operations for Digest entities.
-    """
 
-    async def get_by_date(self, date) -> dict | None:
-        """
-        Return today's digest dict if it exists, else None.
-        Called by top_news_handler to check cache before running pipeline.
-        """
-        # TODO: query Digest by date field
-        raise NotImplementedError
+    def __init__(self, session: AsyncSession):
+        self.session = session
 
-    async def save(self, date, text: str) -> None:
+    async def get_by_date(self, target_date: str) -> Optional[Digest]:
         """
-        Persist a new digest for the given date.
+        Повертає digest за дату або None якщо немає.
+        target_date — рядок формату "2025-04-16"
+        Це головна перевірка кешу в TopNewsSkill.
         """
-        # TODO: create and commit Digest record
-        raise NotImplementedError
+        result = await self.session.execute(
+            select(Digest).where(Digest.digest_date == target_date)
+        )
+        return result.scalar_one_or_none()
+
+    async def save(self, target_date: str, content: str) -> Digest:
+        """
+        Зберігає digest за дату.
+        Якщо за цю дату вже є — оновлює content (на випадок повторного запуску).
+        """
+        existing = await self.get_by_date(target_date)
+
+        if existing:
+            existing.content = content
+            await self.session.commit()
+            return existing
+
+        digest = Digest(digest_date=target_date, content=content)
+        self.session.add(digest)
+        await self.session.commit()
+        return digest
