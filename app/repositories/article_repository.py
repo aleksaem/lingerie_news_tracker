@@ -5,6 +5,7 @@ Handles saving batches of fetched articles and querying by URL or date.
 Used by DeduplicationService (URL check) and TopNewsSkill (save after filter).
 """
 
+import json
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -16,6 +17,12 @@ class ArticleRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    ALLOWED_FIELDS = {
+        "title", "url", "source", "published_at", "content",
+        "relevance", "include_in_digest", "priority", "article_type",
+        "competitor", "summary", "why_it_matters", "tags",
+    }
+
     async def save_many(self, articles: list[dict]) -> int:
         """
         Зберігає список статей. Пропускає дублікати по url (INSERT OR IGNORE).
@@ -26,7 +33,26 @@ class ArticleRepository:
 
         saved = 0
         for article_data in articles:
-            stmt = sqlite_insert(Article).values(**article_data).prefix_with("OR IGNORE")
+            cleaned = {}
+            for key, value in article_data.items():
+                if key in self.ALLOWED_FIELDS:
+                    cleaned[key] = value
+
+            # apply after loop so it always overrides include_in_digest
+            if "include" in article_data:
+                cleaned["include_in_digest"] = article_data["include"]
+
+            if "tags" in cleaned:
+                tags = cleaned["tags"]
+                if isinstance(tags, str):
+                    try:
+                        cleaned["tags"] = json.loads(tags)
+                    except (json.JSONDecodeError, ValueError):
+                        cleaned["tags"] = []
+                elif not isinstance(tags, list):
+                    cleaned["tags"] = []
+
+            stmt = sqlite_insert(Article).values(**cleaned).prefix_with("OR IGNORE")
             result = await self.session.execute(stmt)
             saved += result.rowcount
 

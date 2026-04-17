@@ -18,7 +18,7 @@ class Settings(BaseSettings):
 
     # LLM
     LLM_API_KEY: str
-    LLM_MODEL: str = "gemini-2.0-flash-lite"
+    LLM_MODEL: str = "claude-haiku-4-5"
 
     # Pipeline settings
     MAX_ARTICLES_PER_DIGEST: int = 5

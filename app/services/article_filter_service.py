@@ -15,18 +15,20 @@ from app.clients.llm_client import LLMClient
 
 class ArticleFilterService:
 
-    PROMPT_PATH = Path("app/prompts/article_filter_prompt.txt")
+    DEFAULT_PROMPT_PATH = Path("app/prompts/article_filter_prompt.txt")
     BATCH_DELAY = 0.5  # секунди між викликами щоб не словити rate limit
 
-    def __init__(self, llm_client: LLMClient):
+    def __init__(self, llm_client: LLMClient, prompt_path: Optional[Path] = None):
         self.llm_client = llm_client
-        self._prompt_template = self._load_prompt()
+        self._prompt_template = self._load_prompt(
+            prompt_path or self.DEFAULT_PROMPT_PATH
+        )
 
-    def _load_prompt(self) -> str:
+    def _load_prompt(self, path: Path) -> str:
         try:
-            return self.PROMPT_PATH.read_text(encoding="utf-8")
+            return path.read_text(encoding="utf-8")
         except FileNotFoundError:
-            raise RuntimeError(f"Промпт не знайдено: {self.PROMPT_PATH}")
+            raise RuntimeError(f"Промпт не знайдено: {path}")
 
     async def process_articles(self, articles: list[dict]) -> list[dict]:
         """
@@ -65,6 +67,7 @@ class ArticleFilterService:
             .replace("{source}", article.get("source", ""))
             .replace("{published_at}", article.get("published_at", ""))
             .replace("{content}", article.get("content", "")[:2000])
+            .replace("{matched_brand}", article.get("matched_brand", ""))
         )
 
         raw_response = await self.llm_client.complete(prompt)
@@ -96,6 +99,21 @@ class ArticleFilterService:
             if not required.issubset(data.keys()):
                 print(f"[ArticleFilterService] Відсутні поля: {required - data.keys()}")
                 return None
+
+            tags = data.get("tags", [])
+            if isinstance(tags, str):
+                try:
+                    data["tags"] = json.loads(tags)
+                except (json.JSONDecodeError, ValueError):
+                    data["tags"] = []
+            elif tags is None:
+                data["tags"] = []
+            elif not isinstance(tags, list):
+                data["tags"] = []
+
+            competitor = data.get("competitor")
+            if isinstance(competitor, list):
+                data["competitor"] = competitor[0] if competitor else None
 
             return data
 

@@ -1,12 +1,5 @@
-"""
-DigestRepository — persistence layer for Digest records.
-
-Digest is a daily cached summary. Check get_by_date before running the pipeline;
-save after DigestBuilderService.build() completes.
-"""
-
 from typing import Optional
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Digest
 
@@ -17,29 +10,73 @@ class DigestRepository:
         self.session = session
 
     async def get_by_date(self, target_date: str) -> Optional[Digest]:
-        """
-        Повертає digest за дату або None якщо немає.
-        target_date — рядок формату "2025-04-16"
-        Це головна перевірка кешу в TopNewsSkill.
-        """
-        result = await self.session.execute(
-            select(Digest).where(Digest.digest_date == target_date)
+        """Backward compat — returns global top_news digest."""
+        return await self.get_by_date_and_type(
+            target_date,
+            digest_type="top_news",
+            user_id=None,
         )
+
+    async def get_by_date_and_type(
+        self,
+        target_date: str,
+        digest_type: str,
+        user_id: Optional[int] = None,
+    ) -> Optional[Digest]:
+        query = select(Digest).where(
+            Digest.digest_date == target_date,
+            Digest.digest_type == digest_type,
+        )
+
+        if user_id is None:
+            query = query.where(Digest.user_id.is_(None))
+        else:
+            query = query.where(Digest.user_id == user_id)
+
+        result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
-    async def save(self, target_date: str, content: str) -> Digest:
-        """
-        Зберігає digest за дату.
-        Якщо за цю дату вже є — оновлює content (на випадок повторного запуску).
-        """
-        existing = await self.get_by_date(target_date)
+    async def save(
+        self,
+        target_date: str,
+        content: str,
+        digest_type: str = "top_news",
+        user_id: Optional[int] = None,
+    ) -> Digest:
+        """Insert or update digest. Backward compat: digest_type defaults to top_news."""
+        existing = await self.get_by_date_and_type(target_date, digest_type, user_id)
 
         if existing:
             existing.content = content
             await self.session.commit()
             return existing
 
-        digest = Digest(digest_date=target_date, content=content)
+        digest = Digest(
+            digest_date=target_date,
+            digest_type=digest_type,
+            user_id=user_id,
+            content=content,
+        )
         self.session.add(digest)
         await self.session.commit()
         return digest
+
+    async def invalidate(
+        self,
+        target_date: str,
+        digest_type: str,
+        user_id: Optional[int] = None,
+    ) -> bool:
+        query = delete(Digest).where(
+            Digest.digest_date == target_date,
+            Digest.digest_type == digest_type,
+        )
+
+        if user_id is None:
+            query = query.where(Digest.user_id.is_(None))
+        else:
+            query = query.where(Digest.user_id == user_id)
+
+        result = await self.session.execute(query)
+        await self.session.commit()
+        return result.rowcount > 0
