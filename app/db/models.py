@@ -49,6 +49,7 @@ class Article(Base):
     )
     user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     matched_brand: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    matched_topic: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
 
 
 class Digest(Base):
@@ -67,10 +68,11 @@ class Digest(Base):
         String(20), default="top_news", server_default="top_news"
     )
     user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    topic_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
 
     __table_args__ = (
-        UniqueConstraint("digest_date", "digest_type", "user_id",
-                         name="uq_digest_date_type_user"),
+        UniqueConstraint("digest_date", "digest_type", "user_id", "topic_name",
+                         name="uq_digest_date_type_user_topic"),
     )
 
 
@@ -84,4 +86,17 @@ class UserBrand(Base):
 
     __table_args__ = (
         UniqueConstraint("user_id", "brand_name", name="uq_user_brand"),
+    )
+
+
+class UserTopic(Base):
+    __tablename__ = "user_topics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    topic_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "topic_name", name="uq_user_topic"),
     )

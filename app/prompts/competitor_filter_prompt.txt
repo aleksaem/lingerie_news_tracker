@@ -30,6 +30,22 @@ EXCLUDE if the article is:
 - Press release with no strategic insight beyond announcement
 - Social media recap or influencer content
 
+IMPORTANT DISAMBIGUATION:
+Some brand names (like "La Perla", "Agent Provocateur") may match
+unrelated businesses — restaurants, real estate, events, or other
+companies with similar names.
+
+If the article is clearly NOT about the fashion/lingerie brand
+(e.g. it's about a restaurant, a bar, a hotel, real estate,
+a non-profit, or any non-fashion business with the same name),
+set include: false regardless of brand name match.
+
+To confirm it's the fashion brand, look for signals like:
+- mentions of lingerie, underwear, intimate apparel, swimwear
+- fashion week, runway, collection, campaign
+- luxury fashion, designer brand, retail fashion
+- known brand context (Richemont, luxury group, etc.)
+
 Be strict. Only include articles that a strategy or marketing director
 would find genuinely useful for competitive analysis.
 

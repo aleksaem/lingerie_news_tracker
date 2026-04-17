@@ -22,7 +22,7 @@ class Settings(BaseSettings):
 
     # Pipeline settings
     MAX_ARTICLES_PER_DIGEST: int = 5
-    MAX_RAW_ARTICLES: int = 50  # скільки статей збираємо до фільтрації
+    MAX_RAW_ARTICLES: int = 100  # скільки статей збираємо до фільтрації
 
     # News search
     QUERIES_FILE: str = "queries.json"

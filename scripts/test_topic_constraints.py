@@ -1,0 +1,276 @@
+import asyncio
+from datetime import date
+from app.db.test_session import (
+    init_test_db, TestSessionLocal, drop_test_db
+)
+from app.repositories.digest_repository import DigestRepository
+
+TODAY = date.today().isoformat()
+USER_1 = 111111
+USER_2 = 222222
+
+
+def check_not_touching_prod_db():
+    from app.db.test_session import TEST_DATABASE_URL
+    assert "test.db" in TEST_DATABASE_URL, \
+        f"НЕБЕЗПЕКА: тест використовує не тестову БД! {TEST_DATABASE_URL}"
+    print(f"✓ Використовується тестова БД: {TEST_DATABASE_URL}")
+
+
+check_not_touching_prod_db()
+
+
+async def test():
+    await init_test_db()
+
+    async with TestSessionLocal() as session:
+        repo = DigestRepository(session)
+
+        # ============================================================
+        # Блок 1 — всі дозволені комбінації за один день
+        # ============================================================
+        print("\n=== Блок 1: дозволені комбінації ===")
+
+        combos = [
+            # (digest_type, user_id, topic_name, опис)
+            ("top_news",   None,   None,            "глобальний top_news"),
+            ("competitors", USER_1, None,           "competitors user_1"),
+            ("competitors", USER_2, None,           "competitors user_2"),
+            ("topic_news", USER_1, "Pricing",       "topic Pricing user_1"),
+            ("topic_news", USER_1, "Sustainability", "topic Sustainability user_1"),
+            ("topic_news", USER_1, "Retail",        "topic Retail user_1"),
+            ("topic_news", USER_2, "Pricing",       "topic Pricing user_2"),
+            ("topic_news", USER_2, "Campaigns",     "topic Campaigns user_2"),
+        ]
+
+        for digest_type, user_id, topic_name, desc in combos:
+            try:
+                saved = await repo.save(
+                    TODAY,
+                    f"Content: {desc}",
+                    digest_type=digest_type,
+                    user_id=user_id,
+                    topic_name=topic_name,
+                )
+                assert saved.id is not None
+                print(f"  ✓ {desc}")
+            except Exception as e:
+                print(f"  ✗ ПОМИЛКА для '{desc}': {e}")
+                raise
+
+        # Перевіряємо кількість записів
+        from sqlalchemy import select, func
+        from app.db.models import Digest
+        result = await session.execute(
+            select(func.count()).select_from(Digest)
+            .where(Digest.digest_date == TODAY)
+        )
+        total = result.scalar()
+        assert total == len(combos), \
+            f"Очікували {len(combos)} записів, отримали {total}"
+        print(f"\n✓ В БД рівно {total} записів за {TODAY}")
+
+        # ============================================================
+        # Блок 2 — дублікати мають оновлюватись, не падати
+        # ============================================================
+        print("\n=== Блок 2: повторний save оновлює запис ===")
+
+        duplicates = [
+            ("top_news",   None,   None,             "дублікат top_news"),
+            ("competitors", USER_1, None,            "дублікат competitors user_1"),
+            ("topic_news", USER_1, "Pricing",        "дублікат Pricing user_1"),
+            ("topic_news", USER_2, "Pricing",        "дублікат Pricing user_2"),
+        ]
+
+        for digest_type, user_id, topic_name, desc in duplicates:
+            try:
+                updated = await repo.save(
+                    TODAY,
+                    f"UPDATED: {desc}",
+                    digest_type=digest_type,
+                    user_id=user_id,
+                    topic_name=topic_name,
+                )
+                assert "UPDATED" in updated.content
+                print(f"  ✓ {desc}")
+            except Exception as e:
+                print(f"  ✗ ПОМИЛКА при оновленні '{desc}': {e}")
+                raise
+
+        # Кількість записів не змінилась
+        result = await session.execute(
+            select(func.count()).select_from(Digest)
+            .where(Digest.digest_date == TODAY)
+        )
+        still_same = result.scalar()
+        assert still_same == len(combos), \
+            f"Після оновлень має бути {len(combos)}, отримали {still_same}"
+        print(f"\n✓ Кількість записів не змінилась: {still_same}")
+
+        # ============================================================
+        # Блок 3 — get_by_date_and_type повертає правильний запис
+        # ============================================================
+        print("\n=== Блок 3: читання по всіх параметрах ===")
+
+        reads = [
+            ("top_news",   None,   None,             "top_news"),
+            ("competitors", USER_1, None,            "competitors user_1"),
+            ("competitors", USER_2, None,            "competitors user_2"),
+            ("topic_news", USER_1, "Pricing",        "Pricing user_1"),
+            ("topic_news", USER_1, "Sustainability", "Sustainability user_1"),
+            ("topic_news", USER_2, "Pricing",        "Pricing user_2"),
+        ]
+
+        for digest_type, user_id, topic_name, desc in reads:
+            found = await repo.get_by_date_and_type(
+                TODAY, digest_type, user_id, topic_name
+            )
+            assert found is not None, \
+                f"Не знайдено digest для: {desc}"
+            assert found.digest_type == digest_type
+            assert found.user_id == user_id
+            assert found.topic_name == topic_name
+            print(f"  ✓ {desc}")
+
+        # Чужий user не бачить чужий topic digest
+        wrong_user = await repo.get_by_date_and_type(
+            TODAY, "topic_news", 999999, "Pricing"
+        )
+        assert wrong_user is None
+        print("  ✓ Чужий user отримує None для topic digest")
+
+        # Неіснуючий топік — None
+        wrong_topic = await repo.get_by_date_and_type(
+            TODAY, "topic_news", USER_1, "NonExistent"
+        )
+        assert wrong_topic is None
+        print("  ✓ Неіснуючий топік повертає None")
+
+        # get_by_date (legacy) повертає top_news
+        legacy = await repo.get_by_date(TODAY)
+        assert legacy is not None
+        assert legacy.digest_type == "top_news"
+        assert legacy.topic_name is None
+        print("  ✓ get_by_date (legacy) повертає top_news")
+
+        # ============================================================
+        # Блок 4 — invalidate видаляє тільки потрібний запис
+        # ============================================================
+        print("\n=== Блок 4: invalidate ===")
+
+        # Видаляємо конкретний topic digest
+        deleted = await repo.invalidate(
+            TODAY, "topic_news", USER_1, "Pricing"
+        )
+        assert deleted == True
+        gone = await repo.get_by_date_and_type(
+            TODAY, "topic_news", USER_1, "Pricing"
+        )
+        assert gone is None
+        print("  ✓ invalidate topic Pricing user_1: видалено")
+
+        # Інші topic digest-и user_1 не постраждали
+        sust_still = await repo.get_by_date_and_type(
+            TODAY, "topic_news", USER_1, "Sustainability"
+        )
+        assert sust_still is not None
+        print("  ✓ Sustainability user_1 не постраждав")
+
+        # topic digest user_2 не постраждав
+        user2_still = await repo.get_by_date_and_type(
+            TODAY, "topic_news", USER_2, "Pricing"
+        )
+        assert user2_still is not None
+        print("  ✓ Pricing user_2 не постраждав")
+
+        # top_news не постраждав
+        top_still = await repo.get_by_date(TODAY)
+        assert top_still is not None
+        print("  ✓ top_news не постраждав")
+
+        # competitors не постраждав
+        comp_still = await repo.get_by_date_and_type(
+            TODAY, "competitors", USER_1, None
+        )
+        assert comp_still is not None
+        print("  ✓ competitors user_1 не постраждав")
+
+        # ============================================================
+        # Блок 5 — invalidate_all_topics видаляє всі топіки юзера
+        # ============================================================
+        print("\n=== Блок 5: invalidate_all_topics ===")
+
+        count_before = await session.execute(
+            select(func.count()).select_from(Digest).where(
+                Digest.digest_type == "topic_news",
+                Digest.user_id == USER_1,
+            )
+        )
+        topics_user1_count = count_before.scalar()
+        print(
+            f"  topic_news digest-ів user_1 перед інвалідацією: "
+            f"{topics_user1_count}"
+        )
+
+        deleted_count = await repo.invalidate_all_topics(
+            TODAY, USER_1
+        )
+        assert deleted_count == topics_user1_count, \
+            f"Очікували {topics_user1_count}, видалено {deleted_count}"
+        print(
+            f"  ✓ invalidate_all_topics user_1: "
+            f"видалено {deleted_count} digest-ів"
+        )
+
+        # USER_2 топіки не постраждали
+        user2_topics = await session.execute(
+            select(func.count()).select_from(Digest).where(
+                Digest.digest_type == "topic_news",
+                Digest.user_id == USER_2,
+            )
+        )
+        assert user2_topics.scalar() > 0
+        print("  ✓ topic_news user_2 не постраждав")
+
+        # top_news і competitors не постраждали
+        others = await session.execute(
+            select(func.count()).select_from(Digest).where(
+                Digest.digest_type != "topic_news"
+            )
+        )
+        assert others.scalar() > 0
+        print("  ✓ top_news і competitors не постраждали")
+
+        # ============================================================
+        # Блок 6 — різні дати не конфліктують
+        # ============================================================
+        print("\n=== Блок 6: різні дати ===")
+
+        other_dates = ["2026-01-01", "2026-06-15", "2026-12-31"]
+        for d in other_dates:
+            await repo.save(
+                d, f"Content {d}",
+                digest_type="topic_news",
+                user_id=USER_1,
+                topic_name="Pricing",
+            )
+            print(f"  ✓ topic Pricing user_1 за {d}")
+
+        for d in other_dates:
+            found = await repo.get_by_date_and_type(
+                d, "topic_news", USER_1, "Pricing"
+            )
+            assert found is not None
+            assert found.digest_date == d
+        print("  ✓ Всі дати читаються незалежно")
+
+    await drop_test_db()
+    print("\n" + "="*50)
+    print("✅ ВСІ ПЕРЕВІРКИ ПРОЙДЕНІ")
+    print("БД коректно підтримує всі комбінації:")
+    print("  top_news / competitors / topic_news")
+    print("  з різними user_id і topic_name")
+    print("="*50)
+
+
+asyncio.run(test())

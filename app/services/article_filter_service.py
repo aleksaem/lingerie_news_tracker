@@ -68,6 +68,7 @@ class ArticleFilterService:
             .replace("{published_at}", article.get("published_at", ""))
             .replace("{content}", article.get("content", "")[:2000])
             .replace("{matched_brand}", article.get("matched_brand", ""))
+            .replace("{matched_topic}", article.get("matched_topic", ""))
         )
 
         raw_response = await self.llm_client.complete(prompt)
@@ -89,9 +90,21 @@ class ArticleFilterService:
         """
         try:
             cleaned = raw.strip()
+
+            # Видаляємо markdown блоки будь-якого формату:
+            # ```json ... ``` або ``` ... ```
             if cleaned.startswith("```"):
+                # Прибираємо перший рядок (```json або ```)
+                # і останній рядок (```)
                 lines = cleaned.split("\n")
-                cleaned = "\n".join(lines[1:-1])
+                inner_lines = []
+                for i, line in enumerate(lines):
+                    if i == 0 and line.startswith("```"):
+                        continue
+                    if i == len(lines) - 1 and line.strip() == "```":
+                        continue
+                    inner_lines.append(line)
+                cleaned = "\n".join(inner_lines).strip()
 
             data = json.loads(cleaned)
 
@@ -119,5 +132,5 @@ class ArticleFilterService:
 
         except json.JSONDecodeError as e:
             print(f"[ArticleFilterService] JSON parse error: {e}")
-            print(f"[ArticleFilterService] Raw response: {raw[:200]}")
+            print(f"[ArticleFilterService] Raw: {raw[:300]}")
             return None

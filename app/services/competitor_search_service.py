@@ -2,13 +2,12 @@ from app.clients.news_client import NewsClient
 from app.config import settings
 
 BRAND_QUERY_TEMPLATES = [
-    "{brand} launch",
-    "{brand} campaign",
-    "{brand} expansion",
-    "{brand} retail",
-    "{brand} partnership",
-    "{brand} new collection",
-    "{brand} ecommerce",
+    "{brand} fashion brand launch",
+    "{brand} lingerie campaign",
+    "{brand} brand expansion retail",
+    "{brand} fashion partnership",
+    "{brand} new collection fashion",
+    "{brand} brand strategy",
 ]
 
 
@@ -23,30 +22,35 @@ class CompetitorSearchService:
 
         print(f"[CompetitorSearchService] Пошук по брендах: {brands}")
 
+        per_brand_limit = max(10, settings.MAX_RAW_ARTICLES // len(brands))
+
         all_articles = []
         seen_urls = set()
 
         for brand in brands:
-            brand_articles = await self._fetch_for_brand(brand, seen_urls)
+            brand_articles = await self._fetch_for_brand(brand, seen_urls, limit=per_brand_limit)
             all_articles.extend(brand_articles)
-            print(f"[CompetitorSearchService] '{brand}' → {len(brand_articles)} статей")
+            print(f"[CompetitorSearchService] '{brand}' → {len(brand_articles)} статей (ліміт {per_brand_limit})")
 
         print(f"[CompetitorSearchService] Разом унікальних статей: {len(all_articles)}")
+        return all_articles
 
-        return all_articles[:settings.MAX_RAW_ARTICLES]
-
-    async def _fetch_for_brand(self, brand: str, seen_urls: set) -> list:
+    async def _fetch_for_brand(self, brand: str, seen_urls: set, limit: int = 10) -> list:
         brand_articles = []
         queries = self._build_queries(brand)
 
         for query in queries:
+            if len(brand_articles) >= limit:
+                break
+
             articles = await self.news_client.search(query)
 
             for article in articles:
+                if len(brand_articles) >= limit:
+                    break
                 url = article.get("url", "")
                 if not url or url in seen_urls:
                     continue
-
                 seen_urls.add(url)
                 brand_articles.append({
                     **article,

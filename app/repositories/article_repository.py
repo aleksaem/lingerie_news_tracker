@@ -21,6 +21,7 @@ class ArticleRepository:
         "title", "url", "source", "published_at", "content",
         "relevance", "include_in_digest", "priority", "article_type",
         "competitor", "summary", "why_it_matters", "tags",
+        "search_scope", "user_id", "matched_brand", "matched_topic",
     }
 
     async def save_many(self, articles: list[dict]) -> int:
@@ -101,3 +102,26 @@ class ArticleRepository:
         )
         existing_urls = {row[0] for row in result}
         return [url for url in urls if url not in existing_urls]
+
+    async def get_by_topic(
+        self,
+        user_id: int,
+        topic: str,
+        date: str,
+    ) -> list:
+        """
+        Повертає відфільтровані статті для топіка за дату.
+        Використовується в NewsByTopicsSkill._get_cached_articles.
+        """
+        result = await self.session.execute(
+            select(Article).where(
+                and_(
+                    Article.include_in_digest == True,
+                    Article.matched_topic == topic,
+                    Article.user_id == user_id,
+                    Article.created_at >= f"{date} 00:00:00",
+                    Article.created_at <= f"{date} 23:59:59",
+                )
+            )
+        )
+        return result.scalars().all()

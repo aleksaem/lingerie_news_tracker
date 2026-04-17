@@ -22,6 +22,7 @@ class DigestRepository:
         target_date: str,
         digest_type: str,
         user_id: Optional[int] = None,
+        topic_name: Optional[str] = None,
     ) -> Optional[Digest]:
         query = select(Digest).where(
             Digest.digest_date == target_date,
@@ -33,6 +34,11 @@ class DigestRepository:
         else:
             query = query.where(Digest.user_id == user_id)
 
+        if topic_name is None:
+            query = query.where(Digest.topic_name.is_(None))
+        else:
+            query = query.where(Digest.topic_name == topic_name)
+
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
@@ -42,9 +48,9 @@ class DigestRepository:
         content: str,
         digest_type: str = "top_news",
         user_id: Optional[int] = None,
+        topic_name: Optional[str] = None,
     ) -> Digest:
-        """Insert or update digest. Backward compat: digest_type defaults to top_news."""
-        existing = await self.get_by_date_and_type(target_date, digest_type, user_id)
+        existing = await self.get_by_date_and_type(target_date, digest_type, user_id, topic_name)
 
         if existing:
             existing.content = content
@@ -55,6 +61,7 @@ class DigestRepository:
             digest_date=target_date,
             digest_type=digest_type,
             user_id=user_id,
+            topic_name=topic_name,
             content=content,
         )
         self.session.add(digest)
@@ -66,6 +73,7 @@ class DigestRepository:
         target_date: str,
         digest_type: str,
         user_id: Optional[int] = None,
+        topic_name: Optional[str] = None,
     ) -> bool:
         query = delete(Digest).where(
             Digest.digest_date == target_date,
@@ -77,6 +85,31 @@ class DigestRepository:
         else:
             query = query.where(Digest.user_id == user_id)
 
+        if topic_name is None:
+            query = query.where(Digest.topic_name.is_(None))
+        else:
+            query = query.where(Digest.topic_name == topic_name)
+
         result = await self.session.execute(query)
         await self.session.commit()
         return result.rowcount > 0
+
+    async def invalidate_all_topics(
+        self,
+        target_date: str,
+        user_id: Optional[int] = None,
+    ) -> int:
+        """Delete all topic_news digests for a user on a given date."""
+        query = delete(Digest).where(
+            Digest.digest_date == target_date,
+            Digest.digest_type == "topic_news",
+        )
+
+        if user_id is None:
+            query = query.where(Digest.user_id.is_(None))
+        else:
+            query = query.where(Digest.user_id == user_id)
+
+        result = await self.session.execute(query)
+        await self.session.commit()
+        return result.rowcount

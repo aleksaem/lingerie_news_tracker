@@ -1,11 +1,15 @@
 from datetime import date
-from typing import Tuple, List
+from typing import Tuple, List, Dict
 
 
 class CompetitorDigestBuilderService:
 
     PRIORITY_ORDER = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
-    MAX_ARTICLES = 3
+
+    def _get_limit_per_brand(self, brands: list) -> int:
+        if len(brands) == 1:
+            return 3
+        return 1
 
     def build(self, articles: list, brands: list) -> Tuple[str, List[str]]:
         today = date.today().strftime("%d.%m.%Y")
@@ -23,7 +27,17 @@ class CompetitorDigestBuilderService:
             articles,
             key=lambda a: self.PRIORITY_ORDER.get(a.get("priority", "LOW"), 2)
         )
-        top = sorted_articles[:self.MAX_ARTICLES]
+
+        limit_per_brand = self._get_limit_per_brand(brands)
+
+        seen_brands: Dict[str, int] = {}
+        top = []
+        for article in sorted_articles:
+            brand = article.get("matched_brand", "unknown")
+            count = seen_brands.get(brand, 0)
+            if count < limit_per_brand:
+                top.append(article)
+                seen_brands[brand] = count + 1
 
         blocks = []
         for i, article in enumerate(top, start=1):
