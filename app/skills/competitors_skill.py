@@ -1,3 +1,4 @@
+import asyncio
 from datetime import date
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -43,6 +44,16 @@ class CompetitorsSkill:
         self.deduplication_service = deduplication_service
         self.llm_client = llm_client
         self.builder_service = builder_service
+        self._locks: dict[str, asyncio.Lock] = {}
+
+    def _get_lock(
+        self, user_id: int, filter_value: str
+    ) -> asyncio.Lock:
+        """Повертає лок для конкретного user + filter."""
+        key = f"{user_id}:{filter_value}"
+        if key not in self._locks:
+            self._locks[key] = asyncio.Lock()
+        return self._locks[key]
 
     async def execute_menu(
         self, user_id: int
@@ -92,58 +103,73 @@ class CompetitorsSkill:
             )
             return cached.content, None
 
-        # Повний pipeline для одного бренду
-        print(f"[CompetitorsSkill] Pipeline для '{brand}'")
+        lock = self._get_lock(user_id, brand)
+        async with lock:
+            cached = await self.digest_repo.get_by_date_and_type(
+                today,
+                digest_type="competitors",
+                user_id=user_id,
+                filter_value=brand,
+            )
+            if cached:
+                print(
+                    f"[CompetitorsSkill] Кеш для '{brand}' "
+                    f"з'явився поки чекали"
+                )
+                return cached.content, None
 
-        # Крок 1 — пошук тільки по цьому бренду
-        raw_articles = await self.search_service.fetch_articles(
-            [brand]
-        )
-        if not raw_articles:
-            digest_text = self._empty_digest(brand)
+            # Повний pipeline для одного бренду
+            print(f"[CompetitorsSkill] Pipeline для '{brand}'")
+
+            # Крок 1 — пошук тільки по цьому бренду
+            raw_articles = await self.search_service.fetch_articles(
+                [brand]
+            )
+            if not raw_articles:
+                digest_text = self._empty_digest(brand)
+                await self.digest_repo.save(
+                    today, digest_text,
+                    digest_type="competitors",
+                    user_id=user_id,
+                    filter_value=brand,
+                )
+                return digest_text, None
+
+            # Крок 2 — дедуплікація
+            unique = await self.deduplication_service\
+                .remove_duplicates(raw_articles)
+
+            # Крок 3 — AI фільтрація
+            filter_service = ArticleFilterService(
+                llm_client=self.llm_client,
+                prompt_path=COMPETITOR_PROMPT_PATH,
+            )
+            filtered = await filter_service.process_articles(unique)
+
+            for article in filtered:
+                article["user_id"] = user_id
+
+            # Крок 4 — збереження статей
+            if filtered:
+                await self.article_repo.save_many(filtered)
+
+            # Крок 5 — побудова digest (2-3 статті)
+            header, blocks = self.builder_service.build(
+                filtered, [brand]
+            )
+            digest_text = self.builder_service.build_as_text(
+                filtered, [brand]
+            )
+
+            # Крок 6 — збереження digest
             await self.digest_repo.save(
                 today, digest_text,
                 digest_type="competitors",
                 user_id=user_id,
                 filter_value=brand,
             )
-            return digest_text, None
 
-        # Крок 2 — дедуплікація
-        unique = await self.deduplication_service\
-            .remove_duplicates(raw_articles)
-
-        # Крок 3 — AI фільтрація
-        filter_service = ArticleFilterService(
-            llm_client=self.llm_client,
-            prompt_path=COMPETITOR_PROMPT_PATH,
-        )
-        filtered = await filter_service.process_articles(unique)
-
-        for article in filtered:
-            article["user_id"] = user_id
-
-        # Крок 4 — збереження статей
-        if filtered:
-            await self.article_repo.save_many(filtered)
-
-        # Крок 5 — побудова digest (2-3 статті)
-        header, blocks = self.builder_service.build(
-            filtered, [brand]
-        )
-        digest_text = self.builder_service.build_as_text(
-            filtered, [brand]
-        )
-
-        # Крок 6 — збереження digest
-        await self.digest_repo.save(
-            today, digest_text,
-            digest_type="competitors",
-            user_id=user_id,
-            filter_value=brand,
-        )
-
-        return header, blocks
+            return header, blocks
 
     async def execute_all(
         self, user_id: int
@@ -214,40 +240,55 @@ class CompetitorsSkill:
                 user_id, brand, today
             )
 
-        # Pipeline для одного бренду
-        print(f"[CompetitorsSkill] '{brand}' — pipeline")
-        raw = await self.search_service.fetch_articles([brand])
-        if not raw:
-            return []
-
-        unique = await self.deduplication_service\
-            .remove_duplicates(raw)
-
-        filter_service = ArticleFilterService(
-            llm_client=self.llm_client,
-            prompt_path=COMPETITOR_PROMPT_PATH,
-        )
-        filtered = await filter_service.process_articles(unique)
-
-        for article in filtered:
-            article["user_id"] = user_id
-
-        if filtered:
-            await self.article_repo.save_many(filtered)
-
-        digest_text = self._empty_digest(brand) \
-            if not filtered \
-            else self.builder_service.build_as_text(
-                filtered, [brand]
+        lock = self._get_lock(user_id, brand)
+        async with lock:
+            cached = await self.digest_repo.get_by_date_and_type(
+                today,
+                digest_type="competitors",
+                user_id=user_id,
+                filter_value=brand,
             )
-        await self.digest_repo.save(
-            today, digest_text,
-            digest_type="competitors",
-            user_id=user_id,
-            filter_value=brand,
-        )
+            if cached:
+                print(f"[CompetitorsSkill] '{brand}' — з кешу")
+                return await self._get_cached_articles(
+                    user_id, brand, today
+                )
 
-        return filtered
+            # Pipeline для одного бренду
+            print(f"[CompetitorsSkill] '{brand}' — pipeline")
+            raw = await self.search_service.fetch_articles([brand])
+            if not raw:
+                return []
+
+            unique = await self.deduplication_service\
+                .remove_duplicates(raw)
+
+            filter_service = ArticleFilterService(
+                llm_client=self.llm_client,
+                prompt_path=COMPETITOR_PROMPT_PATH,
+            )
+            filtered = await filter_service.process_articles(unique)
+
+            for article in filtered:
+                article["user_id"] = user_id
+
+            if filtered:
+                await self.article_repo.save_many(filtered)
+
+            digest_text = self._empty_digest(brand) \
+                if not filtered \
+                else self.builder_service.build_as_text(
+                    filtered, [brand]
+                )
+            await self.digest_repo.save(
+                today,
+                digest_text,
+                digest_type="competitors",
+                user_id=user_id,
+                filter_value=brand,
+            )
+
+            return filtered
 
     async def _get_cached_articles(
         self,

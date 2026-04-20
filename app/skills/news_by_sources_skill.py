@@ -1,3 +1,4 @@
+import asyncio
 from datetime import date
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -52,6 +53,16 @@ class NewsBySourcesSkill:
         self.deduplication_service = deduplication_service
         self.llm_client = llm_client
         self.builder_service = builder_service
+        self._locks: dict[str, asyncio.Lock] = {}
+
+    def _get_lock(
+        self, user_id: int, filter_value: str
+    ) -> asyncio.Lock:
+        """Повертає лок для конкретного user + filter."""
+        key = f"{user_id}:{filter_value}"
+        if key not in self._locks:
+            self._locks[key] = asyncio.Lock()
+        return self._locks[key]
 
     async def execute_menu(
         self, user_id: int
@@ -117,55 +128,70 @@ class NewsBySourcesSkill:
             )
             return cached.content, None
 
-        print(
-            f"[NewsBySourcesSkill] Pipeline для "
-            f"'{source.display_name}'"
-        )
-
-        raw_articles = await self.search_service.fetch_for_single_source(
-            source
-        )
-        if not raw_articles:
-            digest_text = self.builder_service.build_single_source_as_text(
-                [], source.display_name
+        lock = self._get_lock(user_id, source_slug)
+        async with lock:
+            cached = await self.digest_repo.get_by_date_and_type(
+                today,
+                digest_type="source_news",
+                user_id=user_id,
+                filter_value=source_slug,
             )
+            if cached:
+                print(
+                    f"[NewsBySourcesSkill] Кеш для "
+                    f"'{source.display_name}' з'явився поки чекали"
+                )
+                return cached.content, None
+
+            print(
+                f"[NewsBySourcesSkill] Pipeline для "
+                f"'{source.display_name}'"
+            )
+
+            raw_articles = await self.search_service.fetch_for_single_source(
+                source
+            )
+            if not raw_articles:
+                digest_text = self.builder_service.build_single_source_as_text(
+                    [], source.display_name
+                )
+                await self.digest_repo.save(
+                    today, digest_text,
+                    digest_type="source_news",
+                    user_id=user_id,
+                    filter_value=source_slug,
+                )
+                return digest_text, None
+
+            unique = await self.deduplication_service.remove_duplicates(
+                raw_articles
+            )
+
+            filter_service = ArticleFilterService(
+                llm_client=self.llm_client,
+                prompt_path=SOURCE_PROMPT_PATH,
+            )
+            filtered = await filter_service.process_articles(unique)
+            self._attach_user_id(filtered, user_id)
+
+            if filtered:
+                await self.article_repo.save_many(filtered)
+
+            header, blocks = self.builder_service.build_single_source(
+                filtered, source.display_name
+            )
+            digest_text = self.builder_service.build_single_source_as_text(
+                filtered, source.display_name
+            )
+
             await self.digest_repo.save(
                 today, digest_text,
                 digest_type="source_news",
                 user_id=user_id,
                 filter_value=source_slug,
             )
-            return digest_text, None
 
-        unique = await self.deduplication_service.remove_duplicates(
-            raw_articles
-        )
-
-        filter_service = ArticleFilterService(
-            llm_client=self.llm_client,
-            prompt_path=SOURCE_PROMPT_PATH,
-        )
-        filtered = await filter_service.process_articles(unique)
-        self._attach_user_id(filtered, user_id)
-
-        if filtered:
-            await self.article_repo.save_many(filtered)
-
-        header, blocks = self.builder_service.build_single_source(
-            filtered, source.display_name
-        )
-        digest_text = self.builder_service.build_single_source_as_text(
-            filtered, source.display_name
-        )
-
-        await self.digest_repo.save(
-            today, digest_text,
-            digest_type="source_news",
-            user_id=user_id,
-            filter_value=source_slug,
-        )
-
-        return header, blocks
+            return header, blocks
 
     async def execute_all(
         self, user_id: int
@@ -234,14 +260,54 @@ class NewsBySourcesSkill:
                 user_id, source.display_name, today
             )
 
-        print(
-            f"[NewsBySourcesSkill] '{source.display_name}'"
-            f" — pipeline"
-        )
-        raw = await self.search_service.fetch_for_single_source(source)
-        if not raw:
+        lock = self._get_lock(user_id, source.slug)
+        async with lock:
+            cached = await self.digest_repo.get_by_date_and_type(
+                today,
+                digest_type="source_news",
+                user_id=user_id,
+                filter_value=source.slug,
+            )
+            if cached:
+                print(
+                    f"[NewsBySourcesSkill] '{source.display_name}'"
+                    f" — з кешу"
+                )
+                return await self._get_cached_articles(
+                    user_id, source.display_name, today
+                )
+
+            print(
+                f"[NewsBySourcesSkill] '{source.display_name}'"
+                f" — pipeline"
+            )
+            raw = await self.search_service.fetch_for_single_source(source)
+            if not raw:
+                digest_text = self.builder_service.build_single_source_as_text(
+                    [], source.display_name
+                )
+                await self.digest_repo.save(
+                    today, digest_text,
+                    digest_type="source_news",
+                    user_id=user_id,
+                    filter_value=source.slug,
+                )
+                return []
+
+            unique = await self.deduplication_service.remove_duplicates(raw)
+
+            filter_service = ArticleFilterService(
+                llm_client=self.llm_client,
+                prompt_path=SOURCE_PROMPT_PATH,
+            )
+            filtered = await filter_service.process_articles(unique)
+            self._attach_user_id(filtered, user_id)
+
+            if filtered:
+                await self.article_repo.save_many(filtered)
+
             digest_text = self.builder_service.build_single_source_as_text(
-                [], source.display_name
+                filtered, source.display_name
             )
             await self.digest_repo.save(
                 today, digest_text,
@@ -249,31 +315,8 @@ class NewsBySourcesSkill:
                 user_id=user_id,
                 filter_value=source.slug,
             )
-            return []
 
-        unique = await self.deduplication_service.remove_duplicates(raw)
-
-        filter_service = ArticleFilterService(
-            llm_client=self.llm_client,
-            prompt_path=SOURCE_PROMPT_PATH,
-        )
-        filtered = await filter_service.process_articles(unique)
-        self._attach_user_id(filtered, user_id)
-
-        if filtered:
-            await self.article_repo.save_many(filtered)
-
-        digest_text = self.builder_service.build_single_source_as_text(
-            filtered, source.display_name
-        )
-        await self.digest_repo.save(
-            today, digest_text,
-            digest_type="source_news",
-            user_id=user_id,
-            filter_value=source.slug,
-        )
-
-        return filtered
+            return filtered
 
     async def _get_cached_articles(
         self,

@@ -1,3 +1,4 @@
+import asyncio
 from datetime import date
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -42,6 +43,16 @@ class NewsByTopicsSkill:
         self.deduplication_service = deduplication_service
         self.llm_client = llm_client
         self.builder_service = builder_service
+        self._locks: dict[str, asyncio.Lock] = {}
+
+    def _get_lock(
+        self, user_id: int, filter_value: str
+    ) -> asyncio.Lock:
+        """Повертає лок для конкретного user + filter."""
+        key = f"{user_id}:{filter_value}"
+        if key not in self._locks:
+            self._locks[key] = asyncio.Lock()
+        return self._locks[key]
 
     async def execute_menu(
         self, user_id: int
@@ -86,15 +97,62 @@ class NewsByTopicsSkill:
             print(f"[NewsByTopicsSkill] Кеш знайдено для '{topic}'")
             return cached.content, None
 
-        print(f"[NewsByTopicsSkill] Pipeline для '{topic}'")
-
-        raw_articles = await self.search_service.fetch_for_single_topic(
-            topic
-        )
-        if not raw_articles:
-            digest_text = self.builder_service.build_single_topic_as_text(
-                [], topic
+        lock = self._get_lock(user_id, topic)
+        async with lock:
+            cached = await self.digest_repo.get_by_date_and_type(
+                today,
+                digest_type="topic_news",
+                user_id=user_id,
+                filter_value=topic,
             )
+            if cached:
+                print(
+                    f"[NewsByTopicsSkill] Кеш для '{topic}' "
+                    f"з'явився поки чекали"
+                )
+                return cached.content, None
+
+            print(f"[NewsByTopicsSkill] Pipeline для '{topic}'")
+
+            raw_articles = await self.search_service.fetch_for_single_topic(
+                topic
+            )
+            if not raw_articles:
+                digest_text = self.builder_service.build_single_topic_as_text(
+                    [], topic
+                )
+                await self.digest_repo.save(
+                    today,
+                    digest_text,
+                    digest_type="topic_news",
+                    user_id=user_id,
+                    filter_value=topic,
+                )
+                return digest_text, None
+
+            unique_articles = await self.deduplication_service.remove_duplicates(
+                raw_articles
+            )
+
+            filter_service = ArticleFilterService(
+                llm_client=self.llm_client,
+                prompt_path=TOPIC_PROMPT_PATH,
+            )
+            filtered_articles = await filter_service.process_articles(
+                unique_articles
+            )
+            self._attach_user_id(filtered_articles, user_id)
+
+            if filtered_articles:
+                await self.article_repo.save_many(filtered_articles)
+
+            header, blocks = self.builder_service.build_single_topic(
+                filtered_articles, topic
+            )
+            digest_text = self.builder_service.build_single_topic_as_text(
+                filtered_articles, topic
+            )
+
             await self.digest_repo.save(
                 today,
                 digest_text,
@@ -102,40 +160,8 @@ class NewsByTopicsSkill:
                 user_id=user_id,
                 filter_value=topic,
             )
-            return digest_text, None
 
-        unique_articles = await self.deduplication_service.remove_duplicates(
-            raw_articles
-        )
-
-        filter_service = ArticleFilterService(
-            llm_client=self.llm_client,
-            prompt_path=TOPIC_PROMPT_PATH,
-        )
-        filtered_articles = await filter_service.process_articles(
-            unique_articles
-        )
-        self._attach_user_id(filtered_articles, user_id)
-
-        if filtered_articles:
-            await self.article_repo.save_many(filtered_articles)
-
-        header, blocks = self.builder_service.build_single_topic(
-            filtered_articles, topic
-        )
-        digest_text = self.builder_service.build_single_topic_as_text(
-            filtered_articles, topic
-        )
-
-        await self.digest_repo.save(
-            today,
-            digest_text,
-            digest_type="topic_news",
-            user_id=user_id,
-            filter_value=topic,
-        )
-
-        return header, blocks
+            return header, blocks
 
     async def execute_all(
         self, user_id: int
@@ -207,13 +233,55 @@ class NewsByTopicsSkill:
                 user_id, topic, today
             )
 
-        print(f"[NewsByTopicsSkill] '{topic}' - запускаємо pipeline")
-        raw_articles = await self.search_service.fetch_for_single_topic(
-            topic
-        )
-        if not raw_articles:
+        lock = self._get_lock(user_id, topic)
+        async with lock:
+            cached = await self.digest_repo.get_by_date_and_type(
+                today,
+                digest_type="topic_news",
+                user_id=user_id,
+                filter_value=topic,
+            )
+            if cached:
+                print(f"[NewsByTopicsSkill] '{topic}' - з кешу")
+                return await self._get_cached_articles(
+                    user_id, topic, today
+                )
+
+            print(f"[NewsByTopicsSkill] '{topic}' - запускаємо pipeline")
+            raw_articles = await self.search_service.fetch_for_single_topic(
+                topic
+            )
+            if not raw_articles:
+                digest_text = self.builder_service.build_single_topic_as_text(
+                    [], topic
+                )
+                await self.digest_repo.save(
+                    today,
+                    digest_text,
+                    digest_type="topic_news",
+                    user_id=user_id,
+                    filter_value=topic,
+                )
+                return []
+
+            unique_articles = await self.deduplication_service.remove_duplicates(
+                raw_articles
+            )
+
+            filter_service = ArticleFilterService(
+                llm_client=self.llm_client,
+                prompt_path=TOPIC_PROMPT_PATH,
+            )
+            filtered_articles = await filter_service.process_articles(
+                unique_articles
+            )
+            self._attach_user_id(filtered_articles, user_id)
+
+            if filtered_articles:
+                await self.article_repo.save_many(filtered_articles)
+
             digest_text = self.builder_service.build_single_topic_as_text(
-                [], topic
+                filtered_articles, topic
             )
             await self.digest_repo.save(
                 today,
@@ -222,36 +290,8 @@ class NewsByTopicsSkill:
                 user_id=user_id,
                 filter_value=topic,
             )
-            return []
 
-        unique_articles = await self.deduplication_service.remove_duplicates(
-            raw_articles
-        )
-
-        filter_service = ArticleFilterService(
-            llm_client=self.llm_client,
-            prompt_path=TOPIC_PROMPT_PATH,
-        )
-        filtered_articles = await filter_service.process_articles(
-            unique_articles
-        )
-        self._attach_user_id(filtered_articles, user_id)
-
-        if filtered_articles:
-            await self.article_repo.save_many(filtered_articles)
-
-        digest_text = self.builder_service.build_single_topic_as_text(
-            filtered_articles, topic
-        )
-        await self.digest_repo.save(
-            today,
-            digest_text,
-            digest_type="topic_news",
-            user_id=user_id,
-            filter_value=topic,
-        )
-
-        return filtered_articles
+            return filtered_articles
 
     async def _get_cached_articles(
         self,
