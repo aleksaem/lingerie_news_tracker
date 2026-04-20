@@ -32,7 +32,7 @@ async def test():
         print("\n=== Блок 1: дозволені комбінації ===")
 
         combos = [
-            # (digest_type, user_id, topic_name, опис)
+            # (digest_type, user_id, filter_value, опис)
             ("top_news",   None,   None,            "глобальний top_news"),
             ("competitors", USER_1, None,           "competitors user_1"),
             ("competitors", USER_2, None,           "competitors user_2"),
@@ -43,14 +43,14 @@ async def test():
             ("topic_news", USER_2, "Campaigns",     "topic Campaigns user_2"),
         ]
 
-        for digest_type, user_id, topic_name, desc in combos:
+        for digest_type, user_id, filter_value, desc in combos:
             try:
                 saved = await repo.save(
                     TODAY,
                     f"Content: {desc}",
                     digest_type=digest_type,
                     user_id=user_id,
-                    topic_name=topic_name,
+                    filter_value=filter_value,
                 )
                 assert saved.id is not None
                 print(f"  ✓ {desc}")
@@ -82,14 +82,14 @@ async def test():
             ("topic_news", USER_2, "Pricing",        "дублікат Pricing user_2"),
         ]
 
-        for digest_type, user_id, topic_name, desc in duplicates:
+        for digest_type, user_id, filter_value, desc in duplicates:
             try:
                 updated = await repo.save(
                     TODAY,
                     f"UPDATED: {desc}",
                     digest_type=digest_type,
                     user_id=user_id,
-                    topic_name=topic_name,
+                    filter_value=filter_value,
                 )
                 assert "UPDATED" in updated.content
                 print(f"  ✓ {desc}")
@@ -121,15 +121,15 @@ async def test():
             ("topic_news", USER_2, "Pricing",        "Pricing user_2"),
         ]
 
-        for digest_type, user_id, topic_name, desc in reads:
+        for digest_type, user_id, filter_value, desc in reads:
             found = await repo.get_by_date_and_type(
-                TODAY, digest_type, user_id, topic_name
+                TODAY, digest_type, user_id, filter_value
             )
             assert found is not None, \
                 f"Не знайдено digest для: {desc}"
             assert found.digest_type == digest_type
             assert found.user_id == user_id
-            assert found.topic_name == topic_name
+            assert found.filter_value == filter_value
             print(f"  ✓ {desc}")
 
         # Чужий user не бачить чужий topic digest
@@ -150,7 +150,7 @@ async def test():
         legacy = await repo.get_by_date(TODAY)
         assert legacy is not None
         assert legacy.digest_type == "top_news"
-        assert legacy.topic_name is None
+        assert legacy.filter_value is None
         print("  ✓ get_by_date (legacy) повертає top_news")
 
         # ============================================================
@@ -196,9 +196,9 @@ async def test():
         print("  ✓ competitors user_1 не постраждав")
 
         # ============================================================
-        # Блок 5 — invalidate_all_topics видаляє всі топіки юзера
+        # Блок 5 — invalidate_by_type видаляє всі топіки юзера
         # ============================================================
-        print("\n=== Блок 5: invalidate_all_topics ===")
+        print("\n=== Блок 5: invalidate_by_type ===")
 
         count_before = await session.execute(
             select(func.count()).select_from(Digest).where(
@@ -212,13 +212,13 @@ async def test():
             f"{topics_user1_count}"
         )
 
-        deleted_count = await repo.invalidate_all_topics(
-            TODAY, USER_1
+        deleted_count = await repo.invalidate_by_type(
+            TODAY, "topic_news", USER_1
         )
         assert deleted_count == topics_user1_count, \
             f"Очікували {topics_user1_count}, видалено {deleted_count}"
         print(
-            f"  ✓ invalidate_all_topics user_1: "
+            f"  ✓ invalidate_by_type user_1: "
             f"видалено {deleted_count} digest-ів"
         )
 
@@ -252,7 +252,7 @@ async def test():
                 d, f"Content {d}",
                 digest_type="topic_news",
                 user_id=USER_1,
-                topic_name="Pricing",
+                filter_value="Pricing",
             )
             print(f"  ✓ topic Pricing user_1 за {d}")
 
@@ -269,7 +269,7 @@ async def test():
     print("✅ ВСІ ПЕРЕВІРКИ ПРОЙДЕНІ")
     print("БД коректно підтримує всі комбінації:")
     print("  top_news / competitors / topic_news")
-    print("  з різними user_id і topic_name")
+    print("  з різними user_id і filter_value")
     print("="*50)
 
 

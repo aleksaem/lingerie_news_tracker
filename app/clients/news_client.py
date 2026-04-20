@@ -75,18 +75,84 @@ class NewsClient:
         """
         import urllib.parse
         encoded = urllib.parse.quote(query)
-        url = f"https://news.google.com/rss/search?q={encoded}&hl=en&gl=US&ceid=US:en"
+        url = (
+            f"https://news.google.com/rss/search"
+            f"?q={encoded}&hl=en&gl=US&ceid=US:en"
+        )
 
         try:
             response = await self.client.get(url)
             response.raise_for_status()
-            return self._parse_rss(response.text, query)
+            articles = self._parse_rss(response.text, query)
+
+            # Розгортаємо Google News URLs
+            if articles:
+                print(
+                    f"[NewsClient] Розгортаємо {len(articles)} URLs..."
+                )
+                articles = await self._resolve_articles_urls(
+                    articles
+                )
+
+            return articles
         except Exception as e:
-            print(f"[NewsClient] RSS fallback failed for '{query}': {e}")
+            print(f"[NewsClient] RSS fallback failed: {e}")
             return []
 
+    async def _resolve_google_news_url(
+        self, url: str
+    ) -> str:
+        """
+        Розгортає Google News редирект URL до реального.
+        Якщо не вдалось — повертає оригінальний URL.
+        """
+        if "news.google.com" not in url:
+            return url
+
+        try:
+            async with httpx.AsyncClient(
+                follow_redirects=True,
+                timeout=10.0,
+            ) as client:
+                response = await client.get(url)
+                final_url = str(response.url)
+                # Якщо все ще google — щось пішло не так
+                if "news.google.com" in final_url:
+                    return url
+                return final_url
+        except Exception as e:
+            print(f"[NewsClient] URL resolve failed: {e}")
+            return url
+
+    async def _resolve_articles_urls(
+        self, articles: list[dict]
+    ) -> list[dict]:
+        """
+        Розгортає Google News URLs для списку статей.
+        Обробляє паралельно для швидкості.
+        """
+        import asyncio
+
+        async def resolve_one(article: dict) -> dict:
+            url = article.get("url", "")
+            if "news.google.com" in url:
+                resolved = await self._resolve_google_news_url(url)
+                return {**article, "url": resolved}
+            return article
+
+        # Паралельно але не більше 5 одночасно
+        # щоб не перевантажити
+        semaphore = asyncio.Semaphore(5)
+
+        async def resolve_with_limit(article):
+            async with semaphore:
+                return await resolve_one(article)
+
+        return await asyncio.gather(
+            *[resolve_with_limit(a) for a in articles]
+        )
+
     def _parse_rss(self, xml_text: str, source: str) -> list[dict]:
-        """Парсить Google News RSS без зовнішніх бібліотек."""
         import xml.etree.ElementTree as ET
 
         articles = []
@@ -96,16 +162,28 @@ class NewsClient:
 
             for item in items:
                 title = item.findtext("title") or ""
-                url = item.findtext("link") or ""
-                pub_date = item.findtext("pubDate") or ""
 
-                if not title or not url:
+                # Google News RSS — url буває в guid або link
+                guid = item.findtext("guid") or ""
+                link = item.findtext("link") or ""
+                url = guid if guid.startswith("http") else link
+
+                # Валідація — має бути повний URL
+                if not url.startswith("http"):
                     continue
+
+                # Обрізаємо якщо URL явно зламаний
+                # (менше 20 символів після домену)
+                if len(url) < 30:
+                    continue
+
+                pub_date = item.findtext("pubDate") or ""
+                source_tag = item.findtext("source") or source
 
                 articles.append({
                     "title": title[:500],
                     "url": url,
-                    "source": item.findtext("source") or "Google News",
+                    "source": source_tag,
                     "published_at": pub_date[:100],
                     "content": item.findtext("description") or "",
                 })

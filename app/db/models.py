@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 SQLAlchemy ORM models for the fashion news assistant.
 
@@ -50,6 +52,9 @@ class Article(Base):
     user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     matched_brand: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     matched_topic: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    matched_source: Mapped[Optional[str]] = mapped_column(
+        String(200), nullable=True
+    )
 
 
 class Digest(Base):
@@ -68,11 +73,15 @@ class Digest(Base):
         String(20), default="top_news", server_default="top_news"
     )
     user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
-    topic_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    filter_value: Mapped[Optional[str]] = mapped_column(
+        String(200), nullable=True
+    )
 
     __table_args__ = (
-        UniqueConstraint("digest_date", "digest_type", "user_id", "topic_name",
-                         name="uq_digest_date_type_user_topic"),
+        UniqueConstraint(
+            "digest_date", "digest_type", "user_id", "filter_value",
+            name="uq_digest_date_type_user_filter",
+        ),
     )
 
 
@@ -99,4 +108,48 @@ class UserTopic(Base):
 
     __table_args__ = (
         UniqueConstraint("user_id", "topic_name", name="uq_user_topic"),
+    )
+
+
+class SourceCatalog(Base):
+    __tablename__ = "sources_catalog"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
+    display_name: Mapped[str] = mapped_column(
+        String(200), nullable=False, unique=True
+    )
+    slug: Mapped[str] = mapped_column(
+        String(200), nullable=False, unique=True, index=True
+    )
+    domain: Mapped[str] = mapped_column(
+        String(200), nullable=False
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True
+    )
+
+
+class UserSource(Base):
+    __tablename__ = "user_sources"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        Integer, nullable=False, index=True
+    )
+    source_id: Mapped[int] = mapped_column(
+        Integer, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "source_id",
+            name="uq_user_source"
+        ),
     )

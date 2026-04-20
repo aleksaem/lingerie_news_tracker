@@ -68,7 +68,9 @@ class ArticleFilterService:
             .replace("{published_at}", article.get("published_at", ""))
             .replace("{content}", article.get("content", "")[:2000])
             .replace("{matched_brand}", article.get("matched_brand", ""))
+            .replace("{competitor}", article.get("matched_brand", ""))
             .replace("{matched_topic}", article.get("matched_topic", ""))
+            .replace("{matched_source}", article.get("matched_source", ""))
         )
 
         raw_response = await self.llm_client.complete(prompt)

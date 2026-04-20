@@ -30,6 +30,15 @@ EXCLUDE if the article is:
 - Press release with no strategic insight beyond announcement
 - Social media recap or influencer content
 
+BRAND DISAMBIGUATION:
+The brand being tracked is "{competitor}".
+If the article uses this word in a completely different context
+(e.g. as a common noun, job title, or unrelated proper noun),
+set include: false.
+
+Only include articles where "{competitor}" clearly refers
+to the fashion or retail brand, not to something else.
+
 IMPORTANT DISAMBIGUATION:
 Some brand names (like "La Perla", "Agent Provocateur") may match
 unrelated businesses — restaurants, real estate, events, or other

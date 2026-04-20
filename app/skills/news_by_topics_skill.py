@@ -80,7 +80,7 @@ class NewsByTopicsSkill:
             today,
             digest_type="topic_news",
             user_id=user_id,
-            topic_name=topic,
+            filter_value=topic,
         )
         if cached:
             print(f"[NewsByTopicsSkill] Кеш знайдено для '{topic}'")
@@ -100,7 +100,7 @@ class NewsByTopicsSkill:
                 digest_text,
                 digest_type="topic_news",
                 user_id=user_id,
-                topic_name=topic,
+                filter_value=topic,
             )
             return digest_text, None
 
@@ -132,7 +132,7 @@ class NewsByTopicsSkill:
             digest_text,
             digest_type="topic_news",
             user_id=user_id,
-            topic_name=topic,
+            filter_value=topic,
         )
 
         return header, blocks
@@ -199,7 +199,7 @@ class NewsByTopicsSkill:
             today,
             digest_type="topic_news",
             user_id=user_id,
-            topic_name=topic,
+            filter_value=topic,
         )
         if cached:
             print(f"[NewsByTopicsSkill] '{topic}' - з кешу")
@@ -220,7 +220,7 @@ class NewsByTopicsSkill:
                 digest_text,
                 digest_type="topic_news",
                 user_id=user_id,
-                topic_name=topic,
+                filter_value=topic,
             )
             return []
 
@@ -248,7 +248,7 @@ class NewsByTopicsSkill:
             digest_text,
             digest_type="topic_news",
             user_id=user_id,
-            topic_name=topic,
+            filter_value=topic,
         )
 
         return filtered_articles

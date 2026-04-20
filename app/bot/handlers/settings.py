@@ -6,19 +6,22 @@ from app.bot.keyboards.settings_menu import (
     get_settings_keyboard,
     get_remove_brand_keyboard,
     get_remove_topic_keyboard,
+    get_remove_source_keyboard,
 )
 from app.bot.states import SettingsStates
 from app.skills.brand_settings_skill import BrandSettingsSkill
 from app.skills.topic_settings_skill import TopicSettingsSkill
+from app.skills.source_settings_skill import SourceSettingsSkill
 
 router = Router()
 
-# Всі кнопки меню - для захисту FSM стану
 MENU_BUTTONS = {
     "📰 Top News", "🏷 Competitors",
-    "📋 News by Topics", "⚙️ Settings",
+    "📋 News by Topics", "📡 News by Sources",
+    "⚙️ Settings",
     "➕ Add Brand", "🗑 Remove Brand",
     "➕ Add Topic", "🗑 Remove Topic",
+    "➕ Add Source", "🗑 Remove Source",
     "👁 View Settings", "⬅️ Back",
 }
 
@@ -26,6 +29,7 @@ MENU_BUTTONS = {
 def setup_settings_handler(
     brand_skill: BrandSettingsSkill,
     topic_skill: TopicSettingsSkill,
+    source_skill: SourceSettingsSkill,
 ) -> Router:
 
     # --- Вхід в Settings ---
@@ -108,7 +112,6 @@ def setup_settings_handler(
                 reply_markup=get_settings_keyboard(),
             )
             return
-
         await message.answer(
             "Select a brand to remove:",
             reply_markup=get_remove_brand_keyboard(brands),
@@ -120,7 +123,6 @@ def setup_settings_handler(
     )
     async def remove_brand_callback(callback: CallbackQuery):
         brand_name = callback.data.split(":", 1)[1]
-
         if brand_name == "cancel":
             await callback.message.edit_text("Cancelled.")
             await callback.answer()
@@ -129,7 +131,6 @@ def setup_settings_handler(
         result = await brand_skill.remove_brand(
             callback.from_user.id, brand_name
         )
-
         remaining = await brand_skill.list_brands(
             callback.from_user.id
         )
@@ -138,10 +139,7 @@ def setup_settings_handler(
                 reply_markup=get_remove_brand_keyboard(remaining)
             )
         else:
-            await callback.message.edit_text(
-                "All brands removed."
-            )
-
+            await callback.message.edit_text("All brands removed.")
         await callback.answer(result, show_alert=False)
 
     # ==========================================
@@ -197,7 +195,6 @@ def setup_settings_handler(
                 reply_markup=get_settings_keyboard(),
             )
             return
-
         await message.answer(
             "Select a topic to remove:",
             reply_markup=get_remove_topic_keyboard(topics),
@@ -209,7 +206,6 @@ def setup_settings_handler(
     )
     async def remove_topic_callback(callback: CallbackQuery):
         topic_name = callback.data.split(":", 1)[1]
-
         if topic_name == "cancel":
             await callback.message.edit_text("Cancelled.")
             await callback.answer()
@@ -218,7 +214,6 @@ def setup_settings_handler(
         result = await topic_skill.remove_topic(
             callback.from_user.id, topic_name
         )
-
         remaining = await topic_skill.list_topics(
             callback.from_user.id
         )
@@ -227,10 +222,104 @@ def setup_settings_handler(
                 reply_markup=get_remove_topic_keyboard(remaining)
             )
         else:
-            await callback.message.edit_text(
-                "All topics removed."
-            )
+            await callback.message.edit_text("All topics removed.")
+        await callback.answer(result, show_alert=False)
 
+    # ==========================================
+    # SOURCE FLOW
+    # ==========================================
+
+    @router.message(lambda m: m.text == "➕ Add Source")
+    async def add_source_start(
+        message: Message, state: FSMContext
+    ):
+        await state.set_state(
+            SettingsStates.waiting_for_source_name
+        )
+        available = await source_skill.get_available_sources_text()
+        await message.answer(
+            f"✏️ Enter the source name you want to follow:\n\n"
+            f"Available sources:\n{available}",
+            parse_mode="Markdown",
+        )
+
+    @router.message(SettingsStates.waiting_for_source_name)
+    async def add_source_receive(
+        message: Message, state: FSMContext
+    ):
+        await state.clear()
+        source_name = (
+            message.text.strip() if message.text else ""
+        )
+
+        if source_name in MENU_BUTTONS:
+            await message.answer(
+                "❌ That looks like a menu button. "
+                "Please enter an actual source name.",
+                reply_markup=get_settings_keyboard(),
+            )
+            return
+
+        result = await source_skill.add_source(
+            message.from_user.id, source_name
+        )
+        await message.answer(
+            result,
+            parse_mode="Markdown",
+            reply_markup=get_settings_keyboard(),
+        )
+
+    @router.message(lambda m: m.text == "🗑 Remove Source")
+    async def remove_source_start(message: Message):
+        sources = await source_skill.list_sources(
+            message.from_user.id
+        )
+        if not sources:
+            await message.answer(
+                "ℹ️ You have no sources to remove.",
+                reply_markup=get_settings_keyboard(),
+            )
+            return
+        await message.answer(
+            "Select a source to remove:",
+            reply_markup=get_remove_source_keyboard(sources),
+        )
+
+    @router.callback_query(
+        lambda c: c.data
+        and c.data.startswith("remove_source:")
+    )
+    async def remove_source_callback(callback: CallbackQuery):
+        value = callback.data.split(":", 1)[1]
+
+        if value == "cancel":
+            await callback.message.edit_text("Cancelled.")
+            await callback.answer()
+            return
+
+        # callback_data містить source_id як число
+        try:
+            source_id = int(value)
+        except ValueError:
+            await callback.answer(
+                "Invalid source.", show_alert=True
+            )
+            return
+
+        result = await source_skill.remove_source(
+            callback.from_user.id, source_id
+        )
+        remaining = await source_skill.list_sources(
+            callback.from_user.id
+        )
+        if remaining:
+            await callback.message.edit_reply_markup(
+                reply_markup=get_remove_source_keyboard(remaining)
+            )
+        else:
+            await callback.message.edit_text(
+                "All sources removed."
+            )
         await callback.answer(result, show_alert=False)
 
     # --- Back ---

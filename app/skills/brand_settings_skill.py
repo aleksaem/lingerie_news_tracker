@@ -2,6 +2,7 @@ from datetime import date
 from typing import List, Optional
 from app.repositories.user_brand_repository import UserBrandRepository
 from app.repositories.user_topic_repository import UserTopicRepository
+from app.repositories.user_source_repository import UserSourceRepository
 from app.repositories.digest_repository import DigestRepository
 
 MAX_BRANDS = 10
@@ -14,10 +15,14 @@ class BrandSettingsSkill:
         user_brand_repo: UserBrandRepository,
         digest_repo: DigestRepository,
         user_topic_repo: Optional[UserTopicRepository] = None,
+        user_source_repo: Optional[UserSourceRepository] = None,
     ):
         self.user_brand_repo = user_brand_repo
         self.digest_repo = digest_repo
         self.user_topic_repo = user_topic_repo or UserTopicRepository(
+            user_brand_repo.session
+        )
+        self.user_source_repo = user_source_repo or UserSourceRepository(
             user_brand_repo.session
         )
 
@@ -42,7 +47,7 @@ class BrandSettingsSkill:
         if not added:
             return f"ℹ️ *{brand_name}* is already in your tracked brands."
 
-        await self.digest_repo.invalidate(
+        await self.digest_repo.invalidate_by_type(
             date.today().isoformat(),
             digest_type="competitors",
             user_id=user_id,
@@ -60,7 +65,7 @@ class BrandSettingsSkill:
         if not removed:
             return f"⚠️ *{brand_name}* not found in your tracked brands."
 
-        await self.digest_repo.invalidate(
+        await self.digest_repo.invalidate_by_type(
             date.today().isoformat(),
             digest_type="competitors",
             user_id=user_id,
@@ -74,6 +79,9 @@ class BrandSettingsSkill:
     async def get_settings_text(self, user_id: int) -> str:
         brands = await self.user_brand_repo.list_brands(user_id)
         topics = await self.user_topic_repo.list_topics(user_id)
+        sources = await self.user_source_repo.list_sources(
+            user_id
+        )
 
         lines = ["⚙️ *Your personalized settings*\n"]
 
@@ -93,8 +101,21 @@ class BrandSettingsSkill:
         else:
             lines.append("_None yet. Add topics via Settings._")
 
+        lines.append("")
+
+        lines.append("*Tracked sources:*")
+        if sources:
+            for source in sources:
+                lines.append(f"• {source.display_name}")
+        else:
+            lines.append(
+                "_None yet. Add sources via Settings._"
+            )
+
         lines.append(
-            f"\nBrands: {len(brands)} · Topics: {len(topics)}"
+            f"\nBrands: {len(brands)} · "
+            f"Topics: {len(topics)} · "
+            f"Sources: {len(sources)}"
         )
 
         return "\n".join(lines)

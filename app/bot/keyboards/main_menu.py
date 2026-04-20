@@ -10,6 +10,9 @@ def get_main_keyboard() -> ReplyKeyboardMarkup:
             ],
             [
                 KeyboardButton(text="📋 News by Topics"),
+                KeyboardButton(text="📡 News by Sources"),
+            ],
+            [
                 KeyboardButton(text="⚙️ Settings"),
             ],
         ],

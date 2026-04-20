@@ -1,4 +1,5 @@
-from typing import Optional
+from __future__ import annotations
+
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Digest
@@ -9,21 +10,31 @@ class DigestRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def get_by_date(self, target_date: str) -> Optional[Digest]:
-        """Backward compat — returns global top_news digest."""
+    async def get_by_date(
+        self, target_date: str
+    ) -> Digest | None:
+        """Зворотна сумісність — глобальний top_news."""
         return await self.get_by_date_and_type(
             target_date,
             digest_type="top_news",
             user_id=None,
+            filter_value=None,
         )
 
     async def get_by_date_and_type(
         self,
         target_date: str,
         digest_type: str,
-        user_id: Optional[int] = None,
-        topic_name: Optional[str] = None,
-    ) -> Optional[Digest]:
+        user_id: int | None = None,
+        filter_value: str | None = None,
+    ) -> Digest | None:
+        """
+        Універсальний метод для всіх типів digest.
+        filter_value:
+          - None для top_news і competitors
+          - topic name для topic_news
+          - source slug для source_news
+        """
         query = select(Digest).where(
             Digest.digest_date == target_date,
             Digest.digest_type == digest_type,
@@ -34,10 +45,14 @@ class DigestRepository:
         else:
             query = query.where(Digest.user_id == user_id)
 
-        if topic_name is None:
-            query = query.where(Digest.topic_name.is_(None))
+        if filter_value is None:
+            query = query.where(
+                Digest.filter_value.is_(None)
+            )
         else:
-            query = query.where(Digest.topic_name == topic_name)
+            query = query.where(
+                Digest.filter_value == filter_value
+            )
 
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
@@ -47,10 +62,12 @@ class DigestRepository:
         target_date: str,
         content: str,
         digest_type: str = "top_news",
-        user_id: Optional[int] = None,
-        topic_name: Optional[str] = None,
+        user_id: int | None = None,
+        filter_value: str | None = None,
     ) -> Digest:
-        existing = await self.get_by_date_and_type(target_date, digest_type, user_id, topic_name)
+        existing = await self.get_by_date_and_type(
+            target_date, digest_type, user_id, filter_value
+        )
 
         if existing:
             existing.content = content
@@ -61,7 +78,7 @@ class DigestRepository:
             digest_date=target_date,
             digest_type=digest_type,
             user_id=user_id,
-            topic_name=topic_name,
+            filter_value=filter_value,
             content=content,
         )
         self.session.add(digest)
@@ -72,8 +89,8 @@ class DigestRepository:
         self,
         target_date: str,
         digest_type: str,
-        user_id: Optional[int] = None,
-        topic_name: Optional[str] = None,
+        user_id: int | None = None,
+        filter_value: str | None = None,
     ) -> bool:
         query = delete(Digest).where(
             Digest.digest_date == target_date,
@@ -85,31 +102,36 @@ class DigestRepository:
         else:
             query = query.where(Digest.user_id == user_id)
 
-        if topic_name is None:
-            query = query.where(Digest.topic_name.is_(None))
+        if filter_value is None:
+            query = query.where(
+                Digest.filter_value.is_(None)
+            )
         else:
-            query = query.where(Digest.topic_name == topic_name)
+            query = query.where(
+                Digest.filter_value == filter_value
+            )
 
         result = await self.session.execute(query)
         await self.session.commit()
         return result.rowcount > 0
 
-    async def invalidate_all_topics(
+    async def invalidate_by_type(
         self,
         target_date: str,
-        user_id: Optional[int] = None,
+        digest_type: str,
+        user_id: int,
     ) -> int:
-        """Delete all topic_news digests for a user on a given date."""
-        query = delete(Digest).where(
-            Digest.digest_date == target_date,
-            Digest.digest_type == "topic_news",
+        """
+        Видаляє всі digest-и конкретного типу для user
+        за дату. Використовується при зміні sources або
+        topics — інвалідує всі одразу.
+        """
+        result = await self.session.execute(
+            delete(Digest).where(
+                Digest.digest_date == target_date,
+                Digest.digest_type == digest_type,
+                Digest.user_id == user_id,
+            )
         )
-
-        if user_id is None:
-            query = query.where(Digest.user_id.is_(None))
-        else:
-            query = query.where(Digest.user_id == user_id)
-
-        result = await self.session.execute(query)
         await self.session.commit()
         return result.rowcount

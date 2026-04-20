@@ -22,6 +22,7 @@ class ArticleRepository:
         "relevance", "include_in_digest", "priority", "article_type",
         "competitor", "summary", "why_it_matters", "tags",
         "search_scope", "user_id", "matched_brand", "matched_topic",
+        "matched_source",
     }
 
     async def save_many(self, articles: list[dict]) -> int:
@@ -118,6 +119,52 @@ class ArticleRepository:
                 and_(
                     Article.include_in_digest == True,
                     Article.matched_topic == topic,
+                    Article.user_id == user_id,
+                    Article.created_at >= f"{date} 00:00:00",
+                    Article.created_at <= f"{date} 23:59:59",
+                )
+            )
+        )
+        return result.scalars().all()
+
+    async def get_by_brand(
+        self,
+        user_id: int,
+        brand: str,
+        date: str,
+    ) -> list:
+        """
+        Повертає відфільтровані статті для бренду за дату.
+        Використовується в CompetitorsSkill для brand-level cache.
+        """
+        result = await self.session.execute(
+            select(Article).where(
+                and_(
+                    Article.include_in_digest == True,
+                    Article.matched_brand == brand,
+                    Article.user_id == user_id,
+                    Article.created_at >= f"{date} 00:00:00",
+                    Article.created_at <= f"{date} 23:59:59",
+                )
+            )
+        )
+        return result.scalars().all()
+
+    async def get_by_source(
+        self,
+        user_id: int,
+        source_display_name: str,
+        date: str,
+    ) -> list:
+        """
+        Повертає відфільтровані статті для source за дату.
+        Використовується в NewsBySourcesSkill._get_cached_articles.
+        """
+        result = await self.session.execute(
+            select(Article).where(
+                and_(
+                    Article.include_in_digest == True,
+                    Article.matched_source == source_display_name,
                     Article.user_id == user_id,
                     Article.created_at >= f"{date} 00:00:00",
                     Article.created_at <= f"{date} 23:59:59",

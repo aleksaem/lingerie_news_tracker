@@ -20,13 +20,29 @@ def setup_handlers(skill: TopNewsSkill) -> Router:
     @router.message(lambda m: m.text == "📰 Top News")
     async def top_news_handler(message: Message):
         wait_msg = await message.answer("⏳ Gathering news, please wait...")
+        deleted = False
         try:
-            header, blocks = await skill.execute()
-            await wait_msg.delete()
+            result = await skill.execute()
+            header, blocks = result if isinstance(result, tuple) \
+                else (result, None)
             await send_digest(message, header, blocks)
+            try:
+                await wait_msg.delete()
+                deleted = True
+            except Exception:
+                pass
         except Exception as e:
-            await wait_msg.delete()
-            await message.answer("😔 Something went wrong. Please try again in a minute.")
+            if not deleted:
+                try:
+                    await wait_msg.delete()
+                except Exception:
+                    pass
+            await message.answer(
+                "😔 Something went wrong. "
+                "Please try again in a minute."
+            )
             print(f"[TopNewsHandler] Error: {e}")
+            import traceback
+            traceback.print_exc()
 
     return router

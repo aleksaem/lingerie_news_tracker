@@ -19,12 +19,17 @@ from app.repositories.article_repository import ArticleRepository
 from app.repositories.digest_repository import DigestRepository
 from app.repositories.user_brand_repository import UserBrandRepository
 from app.repositories.user_topic_repository import UserTopicRepository
+from app.repositories.user_source_repository import UserSourceRepository
+from app.repositories.source_catalog_repository import (
+    SourceCatalogRepository,
+)
 
 from app.services.search_service import SearchService
 from app.services.competitor_search_service import (
     CompetitorSearchService,
 )
 from app.services.topic_search_service import TopicSearchService
+from app.services.source_search_service import SourceSearchService
 from app.services.deduplication_service import DeduplicationService
 from app.services.article_filter_service import ArticleFilterService
 from app.services.digest_builder_service import DigestBuilderService
@@ -34,16 +39,22 @@ from app.services.competitor_digest_builder_service import (
 from app.services.topic_digest_builder_service import (
     TopicDigestBuilderService,
 )
+from app.services.source_digest_builder_service import (
+    SourceDigestBuilderService,
+)
 
 from app.skills.top_news_skill import TopNewsSkill
 from app.skills.competitors_skill import CompetitorsSkill
 from app.skills.news_by_topics_skill import NewsByTopicsSkill
+from app.skills.news_by_sources_skill import NewsBySourcesSkill
 from app.skills.brand_settings_skill import BrandSettingsSkill
 from app.skills.topic_settings_skill import TopicSettingsSkill
+from app.skills.source_settings_skill import SourceSettingsSkill
 
 from app.bot.handlers.top_news import setup_handlers
 from app.bot.handlers.competitors import setup_competitors_handler
 from app.bot.handlers.topic_news import setup_topic_news_handler
+from app.bot.handlers.source_news import setup_source_news_handler
 from app.bot.handlers.settings import setup_settings_handler
 
 
@@ -65,15 +76,19 @@ async def main():
     digest_repo = DigestRepository(session)
     user_brand_repo = UserBrandRepository(session)
     user_topic_repo = UserTopicRepository(session)
+    user_source_repo = UserSourceRepository(session)
+    source_catalog_repo = SourceCatalogRepository(session)
 
     # --- Сервіси ---
     search_service = SearchService(news_client)
     competitor_search_service = CompetitorSearchService(news_client)
     topic_search_service = TopicSearchService(news_client)
+    source_search_service = SourceSearchService(news_client)
     dedup_service = DeduplicationService(article_repo)
     builder_service = DigestBuilderService()
     competitor_builder_service = CompetitorDigestBuilderService()
     topic_builder_service = TopicDigestBuilderService()
+    source_builder_service = SourceDigestBuilderService()
 
     # --- Skills ---
     top_news_skill = TopNewsSkill(
@@ -105,15 +120,32 @@ async def main():
         builder_service=topic_builder_service,
     )
 
+    news_by_sources_skill = NewsBySourcesSkill(
+        user_source_repo=user_source_repo,
+        source_catalog_repo=source_catalog_repo,
+        article_repo=article_repo,
+        digest_repo=digest_repo,
+        search_service=source_search_service,
+        deduplication_service=dedup_service,
+        llm_client=llm_client,
+        builder_service=source_builder_service,
+    )
+
     brand_settings_skill = BrandSettingsSkill(
         user_brand_repo=user_brand_repo,
         digest_repo=digest_repo,
         user_topic_repo=user_topic_repo,
+        user_source_repo=user_source_repo,
     )
 
     topic_settings_skill = TopicSettingsSkill(
         user_topic_repo=user_topic_repo,
         digest_repo=digest_repo,
+    )
+
+    source_settings_skill = SourceSettingsSkill(
+        user_source_repo=user_source_repo,
+        source_catalog_repo=source_catalog_repo,
     )
 
     # --- Bot і Dispatcher ---
@@ -136,9 +168,13 @@ async def main():
         setup_topic_news_handler(news_by_topics_skill)
     )
     dp.include_router(
+        setup_source_news_handler(news_by_sources_skill)
+    )
+    dp.include_router(
         setup_settings_handler(
             brand_skill=brand_settings_skill,
             topic_skill=topic_settings_skill,
+            source_skill=source_settings_skill,
         )
     )
 

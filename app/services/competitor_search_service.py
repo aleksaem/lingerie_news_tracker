@@ -3,11 +3,12 @@ from app.config import settings
 
 BRAND_QUERY_TEMPLATES = [
     "{brand} fashion brand launch",
-    "{brand} lingerie campaign",
-    "{brand} brand expansion retail",
-    "{brand} fashion partnership",
-    "{brand} new collection fashion",
-    "{brand} brand strategy",
+    "{brand} clothing brand campaign",
+    "{brand} fashion brand expansion",
+    "{brand} apparel brand partnership",
+    "{brand} fashion new collection",
+    "{brand} clothing brand strategy",
+    "{brand} lingerie brand news",
 ]
 
 
@@ -51,6 +52,11 @@ class CompetitorSearchService:
                 url = article.get("url", "")
                 if not url or url in seen_urls:
                     continue
+
+                # Перевіряємо що стаття дійсно про цей бренд
+                if not self._is_relevant(article, brand):
+                    continue
+
                 seen_urls.add(url)
                 brand_articles.append({
                     **article,
@@ -62,6 +68,49 @@ class CompetitorSearchService:
 
     def _build_queries(self, brand: str) -> list:
         return [template.format(brand=brand) for template in BRAND_QUERY_TEMPLATES]
+
+    def _is_relevant(
+        self, article: dict, brand: str
+    ) -> bool:
+        """
+        Перевіряє що стаття реально про цей бренд.
+        Захист від загальних слів як Staff, Next, Gap.
+        """
+        title = article.get("title", "").lower()
+        content = article.get("content", "").lower()
+        brand_lower = brand.lower()
+        text = f"{title} {content}"
+
+        # Бренд має бути в заголовку або контенті
+        # як окреме слово (не частина іншого слова)
+        import re
+        pattern = r'\b' + re.escape(brand_lower) + r'\b'
+
+        in_title = bool(re.search(pattern, title))
+        in_content = bool(re.search(pattern, content))
+
+        if not (in_title or in_content):
+            return False
+
+        if brand_lower == "staff":
+            employment_phrases = [
+                "staff stories",
+                "expand staff",
+                "staff by",
+                "staff feedback",
+                "staff bonus",
+                "staff member",
+                "staff members",
+                "staff cuts",
+                "staff layoffs",
+                "staff shortage",
+                "staff union",
+                "staff pay",
+            ]
+            if any(phrase in text for phrase in employment_phrases):
+                return False
+
+        return True
 
     def get_queries_preview(self, brands: list) -> list:
         queries = []

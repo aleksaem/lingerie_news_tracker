@@ -1,33 +1,38 @@
 from aiogram import Router
-from aiogram.types import CallbackQuery, Message
-
-from app.bot.keyboards.topics_menu import get_topics_keyboard
+from aiogram.types import Message, CallbackQuery
+from app.bot.keyboards.sources_menu import get_sources_keyboard
 from app.bot.utils import send_digest
-from app.skills.news_by_topics_skill import NewsByTopicsSkill
+from app.skills.news_by_sources_skill import NewsBySourcesSkill
 
 router = Router()
 
 
-def setup_topic_news_handler(skill: NewsByTopicsSkill) -> Router:
+def setup_source_news_handler(
+    skill: NewsBySourcesSkill,
+) -> Router:
 
-    @router.message(lambda m: m.text == "📋 News by Topics")
-    async def topic_news_handler(message: Message):
+    @router.message(lambda m: m.text == "📡 News by Sources")
+    async def source_news_handler(message: Message):
         user_id = message.from_user.id
 
         try:
-            text, topics = await skill.execute_menu(user_id)
+            text, source_pairs = await skill.execute_menu(
+                user_id
+            )
 
-            if topics is None:
+            # Немає sources — показуємо підказку
+            if source_pairs is None:
                 await message.answer(
                     text,
                     parse_mode="Markdown",
                 )
                 return
 
+            # Є sources — показуємо inline клавіатуру
             await message.answer(
                 text,
                 parse_mode="Markdown",
-                reply_markup=get_topics_keyboard(topics),
+                reply_markup=get_sources_keyboard(source_pairs),
             )
 
         except Exception as e:
@@ -35,30 +40,45 @@ def setup_topic_news_handler(skill: NewsByTopicsSkill) -> Router:
                 "😔 Something went wrong. "
                 "Please try again in a minute."
             )
-            print(f"[TopicNewsHandler] Error in menu: {e}")
+            print(f"[SourceNewsHandler] Menu error: {e}")
             import traceback
             traceback.print_exc()
 
     @router.callback_query(
-        lambda c: c.data and c.data.startswith("topic:")
+        lambda c: c.data and c.data.startswith("source:")
     )
-    async def topic_selected_callback(callback: CallbackQuery):
+    async def source_selected_callback(
+        callback: CallbackQuery,
+    ):
         user_id = callback.from_user.id
-        topic_value = callback.data.split(":", 1)[1]
+        source_value = callback.data.split(":", 1)[1]
 
+        # Знаходимо display_name з тексту натиснутої кнопки
+        source_display = source_value  # fallback — slug
+        if callback.message.reply_markup:
+            for row in callback.message.reply_markup.inline_keyboard:
+                for button in row:
+                    if button.callback_data == callback.data:
+                        source_display = button.text
+                        break
+
+        # Прибираємо клавіатуру одразу
         await callback.message.edit_reply_markup(
             reply_markup=None
         )
         await callback.answer()
 
-        if topic_value == "__all__":
+        # All режим
+        if source_value == "__all__":
             wait_msg = await callback.message.answer(
-                "⏳ Gathering news for all your topics, "
+                "⏳ Gathering news from all your sources, "
                 "please wait..."
             )
             deleted = False
             try:
-                header, blocks = await skill.execute_all(user_id)
+                header, blocks = await skill.execute_all(
+                    user_id
+                )
                 await send_digest(
                     callback.message, header, blocks
                 )
@@ -78,21 +98,22 @@ def setup_topic_news_handler(skill: NewsByTopicsSkill) -> Router:
                     "Please try again in a minute."
                 )
                 print(
-                    f"[TopicNewsHandler] Error in execute_all: {e}"
+                    f"[SourceNewsHandler] execute_all error: {e}"
                 )
                 import traceback
                 traceback.print_exc()
             return
 
+        # Конкретний source
         wait_msg = await callback.message.answer(
-            f"⏳ Gathering news about *{topic_value}*, "
+            f"⏳ Gathering news from *{source_display}*, "
             f"please wait...",
             parse_mode="Markdown",
         )
         deleted = False
         try:
-            header, blocks = await skill.execute_topic(
-                user_id, topic_value
+            header, blocks = await skill.execute_source(
+                user_id, source_value
             )
             await send_digest(
                 callback.message, header, blocks
@@ -113,7 +134,7 @@ def setup_topic_news_handler(skill: NewsByTopicsSkill) -> Router:
                 "Please try again in a minute."
             )
             print(
-                f"[TopicNewsHandler] Error in execute_topic: {e}"
+                f"[SourceNewsHandler] execute_source error: {e}"
             )
             import traceback
             traceback.print_exc()

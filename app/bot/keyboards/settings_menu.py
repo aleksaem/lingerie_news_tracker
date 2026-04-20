@@ -14,6 +14,10 @@ def get_settings_keyboard() -> ReplyKeyboardMarkup:
                 KeyboardButton(text="🗑 Remove Topic"),
             ],
             [
+                KeyboardButton(text="➕ Add Source"),
+                KeyboardButton(text="🗑 Remove Source"),
+            ],
+            [
                 KeyboardButton(text="👁 View Settings"),
                 KeyboardButton(text="⬅️ Back"),
             ],
@@ -53,5 +57,26 @@ def get_remove_topic_keyboard(
     buttons.append([InlineKeyboardButton(
         text="Cancel",
         callback_data="remove_topic:cancel",
+    )])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_remove_source_keyboard(
+    sources,
+) -> InlineKeyboardMarkup:
+    """
+    Inline клавіатура для видалення source.
+    callback_data містить source_id — точний і без двозначностей.
+    """
+    buttons = [
+        [InlineKeyboardButton(
+            text=f"🗑 {source.display_name}",
+            callback_data=f"remove_source:{source.id}",
+        )]
+        for source in sources
+    ]
+    buttons.append([InlineKeyboardButton(
+        text="Cancel",
+        callback_data="remove_source:cancel",
     )])
     return InlineKeyboardMarkup(inline_keyboard=buttons)

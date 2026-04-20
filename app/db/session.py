@@ -9,9 +9,30 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from app.config import settings
 from app.db.models import Base
 
+
+def _get_database_url() -> str:
+    """
+    Reads DATABASE_URL from Settings/env and adapts Railway Postgres URLs
+    for SQLAlchemy async engine.
+    """
+    database_url = settings.DATABASE_URL
+
+    if database_url.startswith("postgres://"):
+        return database_url.replace(
+            "postgres://", "postgresql+asyncpg://", 1
+        )
+
+    if database_url.startswith("postgresql://"):
+        return database_url.replace(
+            "postgresql://", "postgresql+asyncpg://", 1
+        )
+
+    return database_url
+
+
 # Engine — створюється один раз при старті
 engine = create_async_engine(
-    settings.DATABASE_URL,
+    _get_database_url(),
     echo=False,  # True для дебагу SQL запитів
 )
 

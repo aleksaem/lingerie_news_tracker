@@ -1,15 +1,16 @@
 from datetime import date
-from typing import Tuple, List, Dict
+from typing import Tuple, List
 
 
 class CompetitorDigestBuilderService:
 
     PRIORITY_ORDER = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
 
-    def _get_limit_per_brand(self, brands: list) -> int:
-        if len(brands) == 1:
-            return 3
-        return 1
+    def _safe_title(self, title: str) -> str:
+        """Прибирає символи які ламають Markdown."""
+        title = title.replace('*', '').replace('_', '')
+        title = title.replace('&', '&amp;')
+        return title
 
     def build(self, articles: list, brands: list) -> Tuple[str, List[str]]:
         today = date.today().strftime("%d.%m.%Y")
@@ -28,16 +29,19 @@ class CompetitorDigestBuilderService:
             key=lambda a: self.PRIORITY_ORDER.get(a.get("priority", "LOW"), 2)
         )
 
-        limit_per_brand = self._get_limit_per_brand(brands)
-
-        seen_brands: Dict[str, int] = {}
-        top = []
-        for article in sorted_articles:
-            brand = article.get("matched_brand", "unknown")
-            count = seen_brands.get(brand, 0)
-            if count < limit_per_brand:
-                top.append(article)
-                seen_brands[brand] = count + 1
+        if len(brands) == 1:
+            # Один бренд → 2-3 статті
+            top = sorted_articles[:3]
+        else:
+            # Кілька брендів → по 1 на бренд
+            seen_brands: dict[str, int] = {}
+            top = []
+            for article in sorted_articles:
+                brand = article.get("matched_brand", "unknown")
+                count = seen_brands.get(brand, 0)
+                if count < 1:
+                    top.append(article)
+                    seen_brands[brand] = count + 1
 
         blocks = []
         for i, article in enumerate(top, start=1):
@@ -49,10 +53,17 @@ class CompetitorDigestBuilderService:
             matched_brand = article.get("matched_brand", "")
             article_type = article.get("article_type", "")
 
-            lines = [f"*{i}. {title}*"]
+            if len(brands) == 1:
+                lines = [f"*{i}. {self._safe_title(title)}*"]
+            else:
+                lines = [
+                    f"*{matched_brand or 'unknown'}*",
+                    "",
+                    f"*• {self._safe_title(title)}*",
+                ]
 
             meta_parts = []
-            if matched_brand:
+            if matched_brand and len(brands) == 1:
                 meta_parts.append(matched_brand)
             if article_type and article_type != "other":
                 meta_parts.append(article_type.replace("_", " "))
@@ -62,7 +73,7 @@ class CompetitorDigestBuilderService:
                 lines.append(f"_{' · '.join(meta_parts)}_")
 
             if summary:
-                lines.append(summary)
+                lines.append(f"{summary}")
             if why:
                 lines.append(f"💡 {why}")
             if url:

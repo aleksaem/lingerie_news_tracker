@@ -1,7 +1,7 @@
 from datetime import date
 
 
-class TopicDigestBuilderService:
+class SourceDigestBuilderService:
 
     PRIORITY_ORDER = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
 
@@ -11,22 +11,25 @@ class TopicDigestBuilderService:
         title = title.replace('&', '&amp;')
         return title
 
-    def build_single_topic(
+    def build_single_source(
         self,
         articles: list[dict],
-        topic: str,
+        source_display_name: str,
     ) -> tuple[str, list[str]]:
         """
-        Digest для одного конкретного топіка.
+        Digest для одного конкретного джерела.
         Показує 2-3 найкращі статті.
         Повертає (header, blocks).
         """
         today = date.today().strftime("%d.%m.%Y")
-        header = f"📋 *Topic: {topic} — {today}*\n"
+        header = (
+            f"📡 *Source: {source_display_name} — {today}*\n"
+        )
 
         if not articles:
             return header, [
-                f"No relevant news found for *{topic}* today."
+                f"No relevant articles found from "
+                f"*{source_display_name}* today."
             ]
 
         sorted_articles = sorted(
@@ -35,9 +38,8 @@ class TopicDigestBuilderService:
                 a.get("priority", "LOW"), 2
             )
         )
-
-        # 1 топік -> 2-3 статті
         top = sorted_articles[:3]
+
         blocks = [
             self._build_block(i, article)
             for i, article in enumerate(top, start=1)
@@ -45,73 +47,81 @@ class TopicDigestBuilderService:
 
         return header, blocks
 
-    def build_all_topics(
+    def build_all_sources(
         self,
-        articles_by_topic: dict[str, list[dict]],
-        topics: list[str],
+        articles_by_source: dict[str, list[dict]],
+        sources_display_names: list[str],
     ) -> tuple[str, list[str]]:
         """
-        Digest по всіх топіках - All режим.
-        articles_by_topic: {topic_name: [filtered articles]}
+        Digest по всіх джерелах — All режим.
+        articles_by_source: {display_name: [articles]}
 
         Логіка:
-        - 1 топік -> 2-3 статті
-        - 2+ топіки -> 1 стаття на топік
+        - 1 source → 2-3 статті
+        - 2+ sources → 1 стаття на source
         Повертає (header, blocks).
         """
         today = date.today().strftime("%d.%m.%Y")
-        header = f"📋 *News by Topics — {today}*\n"
+        header = f"📡 *News by Sources — {today}*\n"
 
-        if not topics:
-            return header, ["No topics configured."]
+        if not sources_display_names:
+            return header, ["No sources configured."]
 
-        limit_per_topic = 3 if len(topics) == 1 else 1
+        limit_per_source = (
+            3 if len(sources_display_names) == 1 else 1
+        )
 
         blocks = []
-        for topic in topics:
-            topic_articles = articles_by_topic.get(topic, [])
+        for display_name in sources_display_names:
+            source_articles = articles_by_source.get(
+                display_name, []
+            )
 
-            if not topic_articles:
+            if not source_articles:
                 blocks.append(
-                    f"*{topic}*\n"
-                    f"_No relevant news found today._"
+                    f"*{display_name}*\n"
+                    f"_No relevant articles found today._"
                 )
                 continue
 
             sorted_articles = sorted(
-                topic_articles,
+                source_articles,
                 key=lambda a: self.PRIORITY_ORDER.get(
                     a.get("priority", "LOW"), 2
                 )
             )
-            top = sorted_articles[:limit_per_topic]
+            top = sorted_articles[:limit_per_source]
 
-            topic_lines = [f"*{topic}*", ""]
+            source_lines = [f"*{display_name}*", ""]
             for article in top:
                 title = article.get("title", "No title")
                 url = article.get("url", "")
                 summary = article.get("summary", "")
                 why = article.get("why_it_matters", "")
 
-                topic_lines.append(f"*• {self._safe_title(title)}*")
+                source_lines.append(f"*• {self._safe_title(title)}*")
                 if summary:
-                    topic_lines.append(f"{summary}")
+                    source_lines.append(f"{summary}")
                 if why:
-                    topic_lines.append(f"💡 {why}")
+                    source_lines.append(f"💡 {why}")
                 if url:
-                    topic_lines.append(f"[Read more]({url})")
+                    source_lines.append(
+                        f"[Read more]({url})"
+                    )
 
-            blocks.append("\n".join(topic_lines))
+            blocks.append("\n".join(source_lines))
 
         return header, blocks
 
-    def build_single_topic_as_text(
+    def build_single_source_as_text(
         self,
         articles: list[dict],
-        topic: str,
+        source_display_name: str,
     ) -> str:
         """Зручна обгортка для збереження в БД."""
-        header, blocks = self.build_single_topic(articles, topic)
+        header, blocks = self.build_single_source(
+            articles, source_display_name
+        )
         if not blocks:
             return header
         return header + "\n\n" + "\n\n".join(blocks)
@@ -119,23 +129,19 @@ class TopicDigestBuilderService:
     def _build_block(
         self, index: int, article: dict
     ) -> str:
-        """Будує один блок статті для single topic режиму."""
+        """Будує один блок статті."""
         title = article.get("title", "No title")
         url = article.get("url", "")
         summary = article.get("summary", "")
         why = article.get("why_it_matters", "")
-        source = article.get("source", "")
         article_type = article.get("article_type", "")
 
         lines = [f"*{index}. {self._safe_title(title)}*"]
 
-        meta_parts = []
         if article_type and article_type != "other":
-            meta_parts.append(article_type)
-        if source:
-            meta_parts.append(source)
-        if meta_parts:
-            lines.append(f"_{' · '.join(meta_parts)}_")
+            lines.append(
+                f"_{article_type.replace('_', ' ')}_"
+            )
 
         if summary:
             lines.append(summary)

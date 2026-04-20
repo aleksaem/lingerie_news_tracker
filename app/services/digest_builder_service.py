@@ -14,6 +14,12 @@ class DigestBuilderService:
 
     PRIORITY_ORDER = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
 
+    def _safe_title(self, title: str) -> str:
+        """Прибирає символи які ламають Markdown."""
+        title = title.replace('*', '').replace('_', '')
+        title = title.replace('&', '&amp;')
+        return title
+
     def build(self, articles: list) -> Tuple[str, List[str]]:
         """
         Returns (header, blocks) where each block is one formatted article.
@@ -39,7 +45,7 @@ class DigestBuilderService:
             why = article.get("why_it_matters", "")
             source = article.get("source", "")
 
-            lines = [f"*{i}. {title}*"]
+            lines = [f"*{i}. {self._safe_title(title)}*"]
             if source:
                 lines.append(f"_{source}_")
             if summary:

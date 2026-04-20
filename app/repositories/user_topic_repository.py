@@ -3,7 +3,8 @@ from typing import List
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from app.db.models import UserTopic, Digest
+from app.db.models import UserTopic
+from app.repositories.digest_repository import DigestRepository
 
 
 class UserTopicRepository:
@@ -60,13 +61,7 @@ class UserTopicRepository:
     async def invalidate_topic_digests(self, user_id: int) -> int:
         """Delete all topic_news digests for user today. Call on any topic list change."""
         today = date.today().isoformat()
-
-        result = await self.session.execute(
-            delete(Digest).where(
-                Digest.user_id == user_id,
-                Digest.digest_type == "topic_news",
-                Digest.digest_date == today,
-            )
+        digest_repo = DigestRepository(self.session)
+        return await digest_repo.invalidate_by_type(
+            today, "topic_news", user_id
         )
-        await self.session.commit()
-        return result.rowcount
